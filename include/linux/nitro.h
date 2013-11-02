@@ -7,4 +7,4 @@
 
 #define KVM_NITRO_NUM_VMS  	_IOR(KVMIO, 0xE0, __u64)
 
-#endif //VMI_H_
+#endif //NITRO_H_
