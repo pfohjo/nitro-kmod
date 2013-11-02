@@ -61,6 +61,9 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/kvm.h>
 
+#include <linux/nitro.h>
+#include <linux/nitro_main.h>
+
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
 
@@ -2643,6 +2646,9 @@ static long kvm_dev_ioctl(struct file *filp,
 	case KVM_TRACE_PAUSE:
 	case KVM_TRACE_DISABLE:
 		r = -EOPNOTSUPP;
+		break;
+	case KVM_NITRO_NUM_VMS:
+		r = nitro_iotcl_num_vms();
 		break;
 	default:
 		return kvm_arch_dev_ioctl(filp, ioctl, arg);
