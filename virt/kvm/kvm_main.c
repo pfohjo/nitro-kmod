@@ -62,6 +62,7 @@
 #include <trace/events/kvm.h>
 
 #include <linux/nitro.h>
+#include <linux/nitro_main.h>
 
 MODULE_AUTHOR("Qumranet");
 MODULE_LICENSE("GPL");
@@ -2661,7 +2662,8 @@ static long kvm_dev_ioctl(struct file *filp,
 		r = -EOPNOTSUPP;
 		break;
 	case KVM_NITRO_NUM_VMS:
-		printk(KERN_INFO "nitro: KVM_NITRO_NUM_VMS\n");
+		r = nitro_iotcl_num_vms();
+		break;
 	default:
 		return kvm_arch_dev_ioctl(filp, ioctl, arg);
 	}
