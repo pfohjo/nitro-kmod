@@ -602,6 +602,8 @@ static void kvm_destroy_vm(struct kvm *kvm)
 {
 	int i;
 	struct mm_struct *mm = kvm->mm;
+	
+	nitro_destroy_vm(kvm);
 
 	kvm_arch_sync_events(kvm);
 	raw_spin_lock(&kvm_lock);
@@ -2595,6 +2597,8 @@ static int kvm_dev_ioctl_create_vm(unsigned long type)
 	r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR);
 	if (r < 0)
 		kvm_put_kvm(kvm);
+	else
+		nitro_create_vm(r,kvm);
 
 	return r;
 }

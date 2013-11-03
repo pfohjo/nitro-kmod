@@ -3,7 +3,7 @@
 
 #include <linux/ioctl.h>
 #include <linux/kvm.h>
-#include <linux/kvm_host.h>
+//#include <linux/kvm_host.h>
 
 #define KVM_NITRO_NUM_VMS  	_IO(KVMIO, 0xE0)
 
