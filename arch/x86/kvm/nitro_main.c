@@ -4,6 +4,7 @@
 #include <linux/slab.h>
 #include <linux/stddef.h>
 #include <asm/current.h>
+#include <asm-generic/errno-base.h>
 
 #include <linux/kvm_host.h>
 
@@ -33,7 +34,7 @@ inline struct nitro_kvm_s* nitro_get_vm_by_kvm(struct kvm *kvm){
   return kvm->nitro_kvm;
 }
 
-void nitro_create_vm(int fd, struct kvm *kvm){
+void nitro_create_vm_hook(struct kvm *kvm){
   pid_t pid;
   struct nitro_kvm_s *nitro_kvm;
   
@@ -52,7 +53,6 @@ void nitro_create_vm(int fd, struct kvm *kvm){
   
   //init nitro_kvm
   nitro_kvm->creator = pid;
-  nitro_kvm->vm_fd = fd;
   nitro_kvm->kvm = kvm;
   
   //add to global list
@@ -61,7 +61,7 @@ void nitro_create_vm(int fd, struct kvm *kvm){
   raw_spin_unlock(&nitro_vm_lock);
 }
 
-void nitro_destroy_vm(struct kvm *kvm){
+void nitro_destroy_vm_hook(struct kvm *kvm){
   struct nitro_kvm_s *nitro_kvm;
   
   nitro_kvm = nitro_get_vm_by_kvm(kvm);
@@ -87,3 +87,8 @@ int nitro_iotcl_num_vms(void){
   
   return rv;
 }
+
+
+
+
+

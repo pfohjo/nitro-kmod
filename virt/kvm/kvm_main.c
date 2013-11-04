@@ -603,7 +603,7 @@ static void kvm_destroy_vm(struct kvm *kvm)
 	int i;
 	struct mm_struct *mm = kvm->mm;
 	
-	nitro_destroy_vm(kvm);
+	nitro_destroy_vm_hook(kvm);
 
 	kvm_arch_sync_events(kvm);
 	raw_spin_lock(&kvm_lock);
@@ -2485,6 +2485,9 @@ static long kvm_vm_ioctl(struct file *filp,
 		r = 0;
 		break;
 	}
+	case KVM_NITRO_DEATTACH_VM:
+		kvm_put_kvm(kvm);
+		r = 0;
 	default:
 		r = kvm_arch_vm_ioctl(filp, ioctl, arg);
 		if (r == -ENOTTY)
@@ -2594,11 +2597,11 @@ static int kvm_dev_ioctl_create_vm(unsigned long type)
 		return r;
 	}
 #endif
+	nitro_create_vm_hook(kvm);
+
 	r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR);
 	if (r < 0)
 		kvm_put_kvm(kvm);
-	else
-		nitro_create_vm(r,kvm);
 
 	return r;
 }
@@ -2633,6 +2636,7 @@ static long kvm_dev_ioctl_check_extension_generic(long arg)
 static long kvm_dev_ioctl(struct file *filp,
 			  unsigned int ioctl, unsigned long arg)
 {
+	void __user *argp = (void __user *)arg;
 	long r = -EINVAL;
 
 	switch (ioctl) {
@@ -2668,6 +2672,20 @@ static long kvm_dev_ioctl(struct file *filp,
 	case KVM_NITRO_NUM_VMS:
 		r = nitro_iotcl_num_vms();
 		break;
+	case KVM_NITRO_ATTACH_VM: {
+		pid_t creator;
+		struct nitro_kvm_s *nitro_kvm;
+		
+		r = -EFAULT;
+		if (copy_from_user(&creator, argp, sizeof(pid_t)))
+			goto out;
+		
+		nitro_kvm = nitro_get_vm_by_creator(creator);
+		r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, nitro_kvm->kvm, O_RDWR);
+		if (r >= 0)
+			kvm_get_kvm(nitro_kvm->kvm);
+		break;
+	}
 	default:
 		return kvm_arch_dev_ioctl(filp, ioctl, arg);
 	}
