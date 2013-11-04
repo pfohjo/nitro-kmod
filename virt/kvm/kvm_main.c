@@ -2485,7 +2485,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		r = 0;
 		break;
 	}
-	case KVM_NITRO_DEATTACH_VM:
+	case KVM_NITRO_DETACH_VM:
 		kvm_put_kvm(kvm);
 		r = 0;
 	default:
