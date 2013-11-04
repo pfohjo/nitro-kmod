@@ -33,6 +33,8 @@
 
 #include <asm/kvm_host.h>
 
+#include <linux/nitro_main.h>
+
 #ifndef KVM_MMIO_SIZE
 #define KVM_MMIO_SIZE 8
 #endif
@@ -406,6 +408,8 @@ struct kvm {
 #endif
 	long tlbs_dirty;
 	struct list_head devices;
+	
+	struct nitro_kvm_s *nitro_kvm;
 };
 
 #define kvm_err(fmt, ...) \
