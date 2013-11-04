@@ -2585,8 +2585,8 @@ static int kvm_dev_ioctl_create_vm(unsigned long type)
 #endif
 	nitro_create_vm_hook(kvm);
 
-	//r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR | O_CLOEXEC);
-	r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR);
+	r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR | O_CLOEXEC);
+	//r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR);
 
 	if (r < 0)
 		kvm_put_kvm(kvm);
@@ -2669,7 +2669,7 @@ static long kvm_dev_ioctl(struct file *filp,
 			goto out;
 		
 		nitro_kvm = nitro_get_vm_by_creator(creator);
-		r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, nitro_kvm->kvm, O_RDWR);
+		r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, nitro_kvm->kvm, O_RDWR | O_CLOEXEC);
 		if (r >= 0)
 			kvm_get_kvm(nitro_kvm->kvm);
 		break;
