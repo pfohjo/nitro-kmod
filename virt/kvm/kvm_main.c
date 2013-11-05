@@ -2689,17 +2689,17 @@ static long kvm_dev_ioctl(struct file *filp,
 		break;
 	case KVM_NITRO_ATTACH_VM: {
 		pid_t creator;
-		struct nitro_kvm_s *nitro_kvm;
+		struct kvm *kvm;
 		
 		r = -EFAULT;
 		if (copy_from_user(&creator, argp, sizeof(pid_t)))
 			goto out;
 		
-		nitro_kvm = nitro_get_vm_by_creator(creator);
-		kvm_get_kvm(nitro_kvm->kvm);
-		r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, nitro_kvm->kvm, O_RDWR);
+		kvm = nitro_get_vm_by_creator(creator);
+		kvm_get_kvm(kvm);
+		r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR);
 		if(r<0)
-			kvm_put_kvm(nitro_kvm->kvm);
+			kvm_put_kvm(kvm);
 		break;
 	}
 	default:

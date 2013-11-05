@@ -409,7 +409,7 @@ struct kvm {
 	long tlbs_dirty;
 	struct list_head devices;
 	
-	struct nitro_kvm_s *nitro_kvm;
+	struct nitro_kvm *nitro_kvm;
 };
 
 #define kvm_err(fmt, ...) \
