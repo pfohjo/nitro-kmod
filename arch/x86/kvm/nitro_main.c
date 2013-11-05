@@ -3,6 +3,7 @@
 #include <linux/pid.h>
 #include <linux/slab.h>
 #include <linux/stddef.h>
+#include <linux/compiler.h>
 #include <asm/current.h>
 #include <asm-generic/errno-base.h>
 
@@ -12,6 +13,8 @@
 
 DEFINE_RAW_SPINLOCK(nitro_vm_lock);
 LIST_HEAD(nitro_vm_list);
+
+extern int create_vcpu_fd(struct kvm_vcpu*);
 
 struct nitro_kvm_s* nitro_get_vm_by_creator(pid_t creator){
   struct nitro_kvm_s *rv;
@@ -88,7 +91,34 @@ int nitro_iotcl_num_vms(void){
   return rv;
 }
 
-
+int nitro_iotcl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
+  int r;
+  struct kvm_vcpu *v;
+  
+  mutex_lock(&kvm->lock);
+  
+  nvcpus->num_vcpus = atomic_read(&kvm->online_vcpus);
+  if(unlikely(nvcpus->num_vcpus > NITRO_MAX_VCPUS)){
+    goto error_out;
+  }
+  
+  kvm_for_each_vcpu(r, v, kvm){
+    nvcpus->ids[r] = v->vcpu_id;
+    kvm_get_kvm(kvm);
+    nvcpus->fds[r] = create_vcpu_fd(v);
+    if(nvcpus->fds[r]<0){
+      kvm_put_kvm(kvm);//this will have to be cleaned up
+      goto error_out;
+    }
+  }
+  
+  mutex_unlock(&kvm->lock);
+  return 0;
+  
+  error_out:
+  mutex_unlock(&kvm->lock);
+  return -1;
+}
 
 
 

@@ -1899,7 +1899,7 @@ static struct file_operations kvm_vcpu_fops = {
 /*
  * Allocates an inode for the vcpu.
  */
-static int create_vcpu_fd(struct kvm_vcpu *vcpu)
+int create_vcpu_fd(struct kvm_vcpu *vcpu)
 {
 	return anon_inode_getfd("kvm-vcpu", &kvm_vcpu_fops, vcpu, O_RDWR);
 }
@@ -2329,8 +2329,8 @@ static long kvm_vm_ioctl(struct file *filp,
 	void __user *argp = (void __user *)arg;
 	int r;
 
-	if (kvm->mm != current->mm)
-		return -EIO;
+	//if (kvm->mm != current->mm)
+	//	return -EIO;
 	switch (ioctl) {
 	case KVM_CREATE_VCPU:
 		r = kvm_vm_ioctl_create_vcpu(kvm, arg);
@@ -2485,9 +2485,24 @@ static long kvm_vm_ioctl(struct file *filp,
 		r = 0;
 		break;
 	}
-	case KVM_NITRO_DETACH_VM:
-		kvm_put_kvm(kvm);
+	case KVM_NITRO_ATTACH_VCPUS: {
+		struct nitro_vcpus nvcpus;
+
+		r = -EFAULT;
+		if (copy_from_user(&nvcpus, argp, sizeof(nvcpus)))
+			goto out;
+
+		r = nitro_iotcl_attach_vcpus(kvm,&nvcpus);
+		if (r)
+			goto out;
+
+		r = -EFAULT;
+		if (copy_to_user(argp, &nvcpus, sizeof(nvcpus)))
+			goto out;
+
 		r = 0;
+		break;
+	}
 	default:
 		r = kvm_arch_vm_ioctl(filp, ioctl, arg);
 		if (r == -ENOTTY)
@@ -2681,9 +2696,10 @@ static long kvm_dev_ioctl(struct file *filp,
 			goto out;
 		
 		nitro_kvm = nitro_get_vm_by_creator(creator);
+		kvm_get_kvm(nitro_kvm->kvm);
 		r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, nitro_kvm->kvm, O_RDWR);
-		if (r >= 0)
-			kvm_get_kvm(nitro_kvm->kvm);
+		if(r<0)
+			kvm_put_kvm(nitro_kvm->kvm);
 		break;
 	}
 	default:
