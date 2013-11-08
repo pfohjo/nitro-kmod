@@ -73,7 +73,7 @@ int nitro_iotcl_num_vms(void){
 }
 
 int nitro_iotcl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
-  int r;
+  int r,i;
   struct kvm_vcpu *v;
   
   mutex_lock(&kvm->lock);
@@ -88,7 +88,11 @@ int nitro_iotcl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
     kvm_get_kvm(kvm);
     nvcpus->fds[r] = create_vcpu_fd(v);
     if(nvcpus->fds[r]<0){
-      kvm_put_kvm(kvm);//this will have to be cleaned up
+      for(i=r;r>=0;i--){
+	nvcpus->ids[r] = 0;
+	nvcpus->fds[i] = 0;
+	kvm_put_kvm(kvm);
+      }
       goto error_out;
     }
   }

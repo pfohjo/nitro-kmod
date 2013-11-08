@@ -1983,8 +1983,8 @@ static long kvm_vcpu_ioctl(struct file *filp,
 	struct kvm_fpu *fpu = NULL;
 	struct kvm_sregs *kvm_sregs = NULL;
 
-	if (vcpu->kvm->mm != current->mm)
-		return -EIO;
+	//if (vcpu->kvm->mm != current->mm)
+	//	return -EIO;
 
 #if defined(CONFIG_S390) || defined(CONFIG_PPC) || defined(CONFIG_MIPS)
 	/*
@@ -2486,19 +2486,19 @@ static long kvm_vm_ioctl(struct file *filp,
 		break;
 	}
 	case KVM_NITRO_ATTACH_VCPUS: {
+		int i;
 		struct nitro_vcpus nvcpus;
-
-		r = -EFAULT;
-		if (copy_from_user(&nvcpus, argp, sizeof(nvcpus)))
-			goto out;
 
 		r = nitro_iotcl_attach_vcpus(kvm,&nvcpus);
 		if (r)
 			goto out;
 
 		r = -EFAULT;
-		if (copy_to_user(argp, &nvcpus, sizeof(nvcpus)))
+		if (copy_to_user(argp, &nvcpus, sizeof(nvcpus))){
+			for(i=0;i<nvcpus.num_vcpus;i++)
+				kvm_put_kvm(kvm);
 			goto out;
+		}
 
 		r = 0;
 		break;
@@ -2695,7 +2695,11 @@ static long kvm_dev_ioctl(struct file *filp,
 		if (copy_from_user(&creator, argp, sizeof(pid_t)))
 			goto out;
 		
+		r = -ESRCH;
 		kvm = nitro_get_vm_by_creator(creator);
+		if(kvm == NULL)
+			goto out;
+		
 		kvm_get_kvm(kvm);
 		r = anon_inode_getfd("kvm-vm", &kvm_vm_fops, kvm, O_RDWR);
 		if(r<0)
