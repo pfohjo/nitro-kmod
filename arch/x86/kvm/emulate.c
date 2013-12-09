@@ -2202,8 +2202,6 @@ static int em_syscall(struct x86_emulate_ctxt *ctxt)
 
 		ctxt->eflags &= ~(EFLG_VM | EFLG_IF | EFLG_RF);
 	}
-	
-	printk(KERN_INFO "nitro: syscall executed with RAX: %lu\n",reg_read(ctxt, VCPU_REGS_RAX));
 
 	if(vcpu->kvm->nitro.trap_syscall)
 	  vcpu->nitro.trap_syscall_hit = 1;
