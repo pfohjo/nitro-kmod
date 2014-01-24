@@ -6104,10 +6104,6 @@ static int __vcpu_run(struct kvm_vcpu *vcpu)
 		if (vcpu->arch.mp_state == KVM_MP_STATE_RUNNABLE &&
 		    !vcpu->arch.apf.halted)
 			r = vcpu_enter_guest(vcpu);
-	
-			if(r > 0 && vcpu->nitro.trap_syscall_hit)
-				//r = nitro_handle_syscall_trap(vcpu);
-				nitro_handle_syscall_trap(vcpu);
 		else {
 			srcu_read_unlock(&kvm->srcu, vcpu->srcu_idx);
 			kvm_vcpu_block(vcpu);
@@ -6133,6 +6129,9 @@ static int __vcpu_run(struct kvm_vcpu *vcpu)
 
 		if (r <= 0)
 			break;
+		
+		if(vcpu->nitro.event)
+			nitro_report_event(vcpu);
 
 		clear_bit(KVM_REQ_PENDING_TIMER, &vcpu->requests);
 		if (kvm_cpu_has_pending_timer(vcpu))
