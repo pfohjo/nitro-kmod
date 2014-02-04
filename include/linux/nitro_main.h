@@ -6,16 +6,10 @@
 #include <linux/kvm_host.h>
 #include <linux/nitro.h>
 #include <linux/hashtable.h>
+#include <linux/list.h>
 
 #define NITRO_TRAP_SYSCALL 1UL
 //#define NITRO_TRAP_XYZ  (1UL << 1)
-
-struct nitro{
-  uint32_t traps; //determines whether the syscall trap is globally set
-  unsigned long *system_call_bm;
-  unsigned int system_call_max;
-  DECLARE_HASHTABLE(system_call_rsp_ht,7);
-};
 
 struct nitro_syscall_event_ht{
   ulong rsp;
@@ -23,13 +17,38 @@ struct nitro_syscall_event_ht{
   struct hlist_node ht;
 };
 
-struct nitro_vcpu{
-  struct completion k_wait_cv;
-  struct semaphore n_wait_sem;
-  int event;
-  union event_data event_data;
+struct nitro_event{
+  struct list_head q;
+  atomic_t num_waiters;
+  unsigned int event_id;
+  ulong syscall_event_nr;
   ulong syscall_event_rsp;
   ulong syscall_event_cr3;
+  
+  union event_data user_event_data;
+};
+
+struct nitro{
+  spinlock_t nitro_lock;
+  
+  uint32_t traps; //determines which traps are set (e.g., traps | NITRO_TRAP_SYSCALL)
+  
+  struct completion k_wait_cv;
+  struct semaphore n_wait_sem;
+  
+  struct list_head event_q;
+  
+  //system call trap related stuff
+  unsigned long *system_call_bm; //bitmap determining which system calls to report to userspace
+  unsigned int system_call_max;  //the max system call (determines size of system_call_bm)
+  DECLARE_HASHTABLE(system_call_rsp_ht,7); //hashtable responsible for matching system calls with returns
+  
+  
+  
+};
+
+struct nitro_vcpu{
+  
 };
 
 
@@ -48,8 +67,8 @@ void nitro_destroy_vm_hook(struct kvm*);
 void nitro_create_vcpu_hook(struct kvm_vcpu*);
 void nitro_destroy_vcpu_hook(struct kvm_vcpu*);
 
-int nitro_ioctl_get_event(struct kvm_vcpu*);
-int nitro_ioctl_continue(struct kvm_vcpu*);
+int nitro_ioctl_get_event(struct kvm*, void*);
+int nitro_ioctl_continue(struct kvm*);
 
 inline int nitro_is_trap_set(struct kvm*, uint32_t);
 

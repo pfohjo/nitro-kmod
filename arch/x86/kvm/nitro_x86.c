@@ -2,7 +2,7 @@
 
 #include "x86.h"
 
-#include <linux/nitro_main.h>
+
 #include <linux/kernel.h>
 #include <linux/completion.h>
 
@@ -31,7 +31,7 @@ int nitro_set_syscall_trap(struct kvm *kvm,unsigned long *bitmap,int system_call
     msr_info.host_initiated = true;
     kvm_set_msr_common(vcpu, &msr_info);
     
-    init_completion(&vcpu->nitro.k_wait_cv);
+    init_completion(&kvm->nitro.k_wait_cv);
     
     vcpu_put(vcpu);
   }
@@ -45,16 +45,14 @@ int nitro_unset_syscall_trap(struct kvm *kvm){
   u64 efer;
   struct msr_data msr_info;
   struct nitro_syscall_event_ht *ed;
+  struct nitro_event *e, *n;
   
   printk(KERN_INFO "nitro: unset syscall trap\n");
   
   kvm_for_each_vcpu(i, vcpu, kvm){
     //vcpu_load(vcpu);
     
-    vcpu->nitro.event = 0;
-    //if waiters, wake up
-    //if(completion_done(&(vcpu->nitro.k_wait_cv)) == 0)
-    complete_all(&(vcpu->nitro.k_wait_cv));
+
     
     
     nitro_vcpu_load(vcpu);
@@ -81,15 +79,25 @@ int nitro_unset_syscall_trap(struct kvm *kvm){
   hash_for_each(kvm->nitro.system_call_rsp_ht,i,ed,ht){
     kfree(ed);
   }
+  
+  
+  if(!kvm->nitro.traps){
+    list_for_each_entry_safe(e,n,&kvm->nitro.event_q,q){
+      list_del(&e->q);
+      kfree(e);
+    }
+    //if waiters, wake up
+    complete_all(&(kvm->nitro.k_wait_cv));
+  }
 
   return 0;
 }
 
-void nitro_wait(struct kvm_vcpu *vcpu){
+void nitro_wait(struct kvm *kvm){
   long rv;
   
-  up(&(vcpu->nitro.n_wait_sem));
-  rv = wait_for_completion_interruptible_timeout(&(vcpu->nitro.k_wait_cv),msecs_to_jiffies(30000));
+  up(&(kvm->nitro.n_wait_sem));
+  rv = wait_for_completion_interruptible_timeout(&(kvm->nitro.k_wait_cv),msecs_to_jiffies(30000));
   
   if (rv == 0)
     printk(KERN_INFO "nitro: %s: wait timed out\n",__FUNCTION__);
@@ -99,49 +107,32 @@ void nitro_wait(struct kvm_vcpu *vcpu){
   return;
 }
 
-int nitro_report_syscall(struct kvm_vcpu *vcpu){
-  unsigned long syscall_nr;
-  struct kvm *kvm;
+int nitro_report_syscall(struct kvm *kvm, struct nitro_event *e){
   struct nitro_syscall_event_ht *ed;
   
-  kvm = vcpu->kvm;
   
-  if(kvm->nitro.system_call_max > 0){
-    syscall_nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
-    
-    if(syscall_nr > INT_MAX || syscall_nr > kvm->nitro.system_call_max || !test_bit((int)syscall_nr,kvm->nitro.system_call_bm))
-      return 0;
-  }
+  if(kvm->nitro.system_call_max > 0 && (e->syscall_event_nr > INT_MAX || e->syscall_event_nr > kvm->nitro.system_call_max || !test_bit((int)e->syscall_event_nr,kvm->nitro.system_call_bm)))
+    return 0;
   
   ed = kzalloc(sizeof(struct nitro_syscall_event_ht),GFP_KERNEL);
-  ed->rsp = vcpu->nitro.syscall_event_rsp;
-  ed->cr3 = vcpu->nitro.syscall_event_cr3;
-  //hash_add(kvm->nitro.system_call_rsp_ht,&ed->ht,ed->rsp);
+  ed->rsp = e->syscall_event_rsp;
+  ed->cr3 = e->syscall_event_cr3;
   nitro_hash_add(kvm,&ed,ed->rsp);
-  
-  memset(&vcpu->nitro.event_data,0,sizeof(union event_data));
-  vcpu->nitro.event_data.syscall = vcpu->nitro.syscall_event_rsp;
 
-  nitro_wait(vcpu);
+  nitro_wait(kvm);
   
   return 0;
 }
 
-int nitro_report_sysret(struct kvm_vcpu *vcpu){
-  struct kvm *kvm;
+int nitro_report_sysret(struct kvm *kvm, struct nitro_event *e){
   struct nitro_syscall_event_ht *ed;
   
-  kvm = vcpu->kvm;
-  
-  hash_for_each_possible(kvm->nitro.system_call_rsp_ht, ed, ht, vcpu->nitro.syscall_event_rsp){
-    if((ed->rsp == vcpu->nitro.syscall_event_rsp) && (ed->cr3 == vcpu->nitro.syscall_event_cr3)){
+  hash_for_each_possible(kvm->nitro.system_call_rsp_ht, ed, ht, e->syscall_event_rsp){
+    if((ed->rsp == e->syscall_event_rsp) && (ed->cr3 == e->syscall_event_cr3)){
       hash_del(&ed->ht);
       kfree(ed);
       
-      memset(&vcpu->nitro.event_data,0,sizeof(union event_data));
-      vcpu->nitro.event_data.syscall = vcpu->nitro.syscall_event_rsp;
-      
-      nitro_wait(vcpu);
+      nitro_wait(kvm);
       break;
     }
   }
@@ -149,25 +140,40 @@ int nitro_report_sysret(struct kvm_vcpu *vcpu){
   return 0;
 }
 
-int nitro_report_event(struct kvm_vcpu *vcpu){
-  int r;
+int nitro_report_event(struct kvm *kvm){
+  int r, rv;
+  struct nitro_event *e;
   
   r = 0;
   
-  switch(vcpu->nitro.event){
+  e = list_first_entry(&kvm->nitro.event_q,struct nitro_event,q);
+  
+  if(atomic_add_return(1,&e->num_waiters) < atomic_read(&kvm->online_vcpus)){
+    printk(KERN_INFO "nitro: dumb waiting...\n");
+    rv = wait_for_completion_interruptible_timeout(&(kvm->nitro.k_wait_cv),msecs_to_jiffies(30000));
+  
+    if (rv == 0)
+      printk(KERN_INFO "nitro: %s: wait timed out\n",__FUNCTION__);
+    else if (rv < 0)
+      printk(KERN_INFO "nitro: %s: wait interrupted\n",__FUNCTION__);
+    
+    return 0;
+  }
+  
+  switch(e->event_id){
     case KVM_NITRO_EVENT_ERROR:
-      nitro_wait(vcpu);
+      nitro_wait(kvm);
       break;
     case KVM_NITRO_EVENT_SYSCALL:
-      r = nitro_report_syscall(vcpu);
+      r = nitro_report_syscall(kvm,e);
       break;
     case KVM_NITRO_EVENT_SYSRET:
-      r = nitro_report_sysret(vcpu);
+      r = nitro_report_sysret(kvm,e);
       break;
     default:
-      printk(KERN_INFO "nitro: %s: unknown event encountered (%d)\n",__FUNCTION__,vcpu->nitro.event);
+      printk(KERN_INFO "nitro: %s: unknown event encountered (%d)\n",__FUNCTION__,e->event_id);
   }
-  vcpu->nitro.event = 0;
+
   return r;
 }
 

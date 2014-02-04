@@ -25,6 +25,7 @@
 #include <linux/module.h>
 #include <asm/kvm_emulate.h>
 #include <linux/stringify.h>
+#include <linux/list.h>
 #include <linux/nitro_main.h>
 
 #include "x86.h"
@@ -2154,12 +2155,21 @@ static int em_syscall(struct x86_emulate_ctxt *ctxt)
 	u64 msr_data;
 	u16 cs_sel, ss_sel;
 	u64 efer = 0;
+	struct nitro_event *e;
 	struct kvm_vcpu *vcpu = container_of(ctxt, struct kvm_vcpu, arch.emulate_ctxt);
+	struct kvm *kvm = vcpu->kvm;
 	
-	if(nitro_is_trap_set(vcpu->kvm, NITRO_TRAP_SYSCALL)){
-		vcpu->nitro.event = KVM_NITRO_EVENT_SYSCALL;
-		vcpu->nitro.syscall_event_rsp = reg_read(ctxt, VCPU_REGS_RSP);
-		vcpu->nitro.syscall_event_cr3 = ctxt->ops->get_cr(ctxt, 3);
+	if(nitro_is_trap_set(kvm, NITRO_TRAP_SYSCALL)){
+		e = kzalloc(sizeof(struct nitro_event),GFP_KERNEL);
+		e->event_id = KVM_NITRO_EVENT_SYSCALL;
+		atomic_set(&e->num_waiters,0);
+		e->syscall_event_nr = reg_read(ctxt, VCPU_REGS_RAX);
+		e->syscall_event_cr3 = ctxt->ops->get_cr(ctxt, 3);
+		e->syscall_event_rsp = reg_read(ctxt, VCPU_REGS_RSP);
+		e->user_event_data.syscall = e->syscall_event_rsp;
+		spin_lock(&kvm->nitro.nitro_lock);
+		list_add_tail(&e->q,&kvm->nitro.event_q);
+		spin_unlock(&kvm->nitro.nitro_lock);
 	}
 
 
@@ -2174,7 +2184,7 @@ static int em_syscall(struct x86_emulate_ctxt *ctxt)
 	ops->get_msr(ctxt, MSR_EFER, &efer);
 	setup_syscalls_segments(ctxt, &cs, &ss);
 
-	if (!(efer & EFER_SCE) && !nitro_is_trap_set(vcpu->kvm, NITRO_TRAP_SYSCALL))
+	if (!(efer & EFER_SCE) && !nitro_is_trap_set(kvm, NITRO_TRAP_SYSCALL))
 		return emulate_ud(ctxt);
 	
 	ops->get_msr(ctxt, MSR_STAR, &msr_data);
@@ -2222,7 +2232,9 @@ static int em_sysret(struct x86_emulate_ctxt *ctxt)
 	u64 msr_data, rcx;
 	u16 cs_sel, ss_sel;
 	u64 efer = 0;
+	struct nitro_event *e;
 	struct kvm_vcpu *vcpu = container_of(ctxt, struct kvm_vcpu, arch.emulate_ctxt);
+	struct kvm *kvm = vcpu->kvm;
 
 	/* syscall is not available in real mode */
 	if (ctxt->mode == X86EMUL_MODE_REAL ||
@@ -2246,7 +2258,7 @@ static int em_sysret(struct x86_emulate_ctxt *ctxt)
 	ops->get_msr(ctxt, MSR_EFER, &efer);
 	setup_syscalls_segments(ctxt, &cs, &ss);
 
-	if (!(efer & EFER_SCE) && !nitro_is_trap_set(vcpu->kvm, NITRO_TRAP_SYSCALL))
+	if (!(efer & EFER_SCE) && !nitro_is_trap_set(kvm, NITRO_TRAP_SYSCALL))
 		return emulate_ud(ctxt);
 
 
@@ -2279,10 +2291,17 @@ static int em_sysret(struct x86_emulate_ctxt *ctxt)
 
 	ctxt->_eip = reg_read(ctxt, VCPU_REGS_RCX);
 	
-	if(nitro_is_trap_set(vcpu->kvm, NITRO_TRAP_SYSCALL)){
-		vcpu->nitro.event = KVM_NITRO_EVENT_SYSRET;
-		vcpu->nitro.syscall_event_rsp = reg_read(ctxt, VCPU_REGS_RSP);
-		vcpu->nitro.syscall_event_cr3 = ctxt->ops->get_cr(ctxt, 3);
+	if(nitro_is_trap_set(kvm, NITRO_TRAP_SYSCALL)){
+		e = kzalloc(sizeof(struct nitro_event),GFP_KERNEL);
+		e->event_id = KVM_NITRO_EVENT_SYSRET;
+		atomic_set(&e->num_waiters,0);
+		e->syscall_event_nr = reg_read(ctxt, VCPU_REGS_RAX);
+		e->syscall_event_cr3 = ctxt->ops->get_cr(ctxt, 3);
+		e->syscall_event_rsp = reg_read(ctxt, VCPU_REGS_RSP);
+		e->user_event_data.syscall = e->syscall_event_rsp;
+		spin_lock(&kvm->nitro.nitro_lock);
+		list_add_tail(&e->q,&kvm->nitro.event_q);
+		spin_unlock(&kvm->nitro.nitro_lock);
 	}
 
 	return X86EMUL_CONTINUE;

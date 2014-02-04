@@ -1981,14 +1981,6 @@ static long kvm_vcpu_ioctl(struct file *filp,
 
 	//asynchronous calls that dont require vcpu_load()
 	switch(ioctl){
-	case KVM_NITRO_GET_EVENT:
-		r = nitro_ioctl_get_event(vcpu);
-		if (copy_to_user(argp, &vcpu->nitro.event_data, sizeof(union event_data)))
-			r = -EFAULT;
-		goto out_no_put;
-	case KVM_NITRO_CONTINUE:
-		r = nitro_ioctl_continue(vcpu);
-		goto out_no_put;
 	case KVM_NITRO_GET_REGS: {
 		struct kvm_regs *kvm_regs;
 
@@ -2060,12 +2052,6 @@ out_free2:
 	if (ioctl == KVM_S390_INTERRUPT || ioctl == KVM_INTERRUPT)
 		return kvm_arch_vcpu_ioctl(filp, ioctl, arg);
 #endif
-	
-	//asynchronous nitro calls
-	if (ioctl == KVM_NITRO_GET_EVENT)
-		return nitro_ioctl_get_event(vcpu);
-	else if(ioctl == KVM_NITRO_CONTINUE)
-		return nitro_ioctl_continue(vcpu);
 */
 	
 
@@ -2582,6 +2568,12 @@ static long kvm_vm_ioctl(struct file *filp,
 		r = 0;
 		break;
 	}
+	case KVM_NITRO_GET_EVENT:
+		r = nitro_ioctl_get_event(kvm,argp);
+		break;
+	case KVM_NITRO_CONTINUE:
+		r = nitro_ioctl_continue(kvm);
+		break;
 	default:
 		r = kvm_arch_vm_ioctl(filp, ioctl, arg);
 		if (r == -ENOTTY)

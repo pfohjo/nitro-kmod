@@ -70,15 +70,25 @@ void nitro_create_vm_hook(struct kvm *kvm){
   printk(KERN_INFO "nitro: new VM created, creating process: %d\n", pid);
   
   //init nitro
+  spin_lock_init(&kvm->nitro.nitro_lock);
+  
   kvm->nitro.traps = 0;
+  INIT_LIST_HEAD(&kvm->nitro.event_q);
+  
   kvm->nitro.system_call_bm = NULL;
   kvm->nitro.system_call_max = 0;
   hash_init(kvm->nitro.system_call_rsp_ht);
+  
+  init_completion(&(kvm->nitro.k_wait_cv));
+  sema_init(&(kvm->nitro.n_wait_sem),0);
 }
 
 void nitro_destroy_vm_hook(struct kvm *kvm){
+  struct nitro_event *e;
+  
   //deinit nitro
   kvm->nitro.traps = 0;
+  
   if(kvm->nitro.system_call_bm != NULL){
     kfree(kvm->nitro.system_call_bm);
     kvm->nitro.system_call_bm = NULL;
@@ -87,13 +97,9 @@ void nitro_destroy_vm_hook(struct kvm *kvm){
 }
 
 void nitro_create_vcpu_hook(struct kvm_vcpu *vcpu){
-  vcpu->nitro.event = 0;
-  init_completion(&(vcpu->nitro.k_wait_cv));
-  sema_init(&(vcpu->nitro.n_wait_sem),0);
 }
 
 void nitro_destroy_vcpu_hook(struct kvm_vcpu *vcpu){
-  vcpu->nitro.event = 0;
 }
 
 int nitro_iotcl_num_vms(void){
@@ -141,24 +147,31 @@ error_out:
   return -1;
 }
 
-int nitro_ioctl_get_event(struct kvm_vcpu *vcpu){
+int nitro_ioctl_get_event(struct kvm *kvm, void *argp){
   int rv;
+  struct nitro_event *e;
   
-  rv = down_interruptible(&(vcpu->nitro.n_wait_sem));
+  rv = down_interruptible(&(kvm->nitro.n_wait_sem));
   
-  if (rv == 0)
-    rv = vcpu->nitro.event;
+  if (rv == 0){
+    e = list_first_entry(&kvm->nitro.event_q,struct nitro_event,q);
+    rv = e->event_id;
+    if (copy_to_user(argp, &e->user_event_data, sizeof(union event_data)))
+      rv = -EFAULT;
+    list_del(&e->q);
+    kfree(e);
+  }
   
   return rv;
 }
 
-int nitro_ioctl_continue(struct kvm_vcpu *vcpu){
+int nitro_ioctl_continue(struct kvm *kvm){
   
   //if no waiters
-  if(completion_done(&(vcpu->nitro.k_wait_cv)))
+  if(completion_done(&(kvm->nitro.k_wait_cv)))
     return -1;
   
-  complete(&(vcpu->nitro.k_wait_cv));
+  complete_all(&(kvm->nitro.k_wait_cv));
   return 0;
 }
 
