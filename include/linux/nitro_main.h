@@ -53,6 +53,8 @@ struct nitro_vcpu{
 
 
 void nitro_hash_add(struct kvm*, struct nitro_syscall_event_ht**, ulong);
+void nitro_complete_all(struct kvm*, struct completion*);
+void nitro_complete_rest(struct kvm*, struct completion*);
   
 int nitro_vcpu_load(struct kvm_vcpu*);
 

@@ -32,17 +32,35 @@ void nitro_hash_add(struct kvm *kvm, struct nitro_syscall_event_ht **hnode, ulon
   return;
 }
 
+void nitro_complete_all(struct kvm *kvm, struct completion *x){
+  unsigned long flags;
+  
+  spin_lock_irqsave(&x->wait.lock, flags);
+  x->done += atomic_read(&kvm->online_vcpus);
+  __wake_up_locked(&x->wait, TASK_NORMAL, 0);
+  spin_unlock_irqrestore(&x->wait.lock, flags);
+}
+
+void nitro_complete_rest(struct kvm *kvm, struct completion *x){
+  unsigned long flags;
+  
+  spin_lock_irqsave(&x->wait.lock, flags);
+  x->done += atomic_read(&kvm->online_vcpus) - 1;
+  __wake_up_locked(&x->wait, TASK_NORMAL, 0);
+  spin_unlock_irqrestore(&x->wait.lock, flags);
+}
+
 int nitro_vcpu_load(struct kvm_vcpu *vcpu)
 {
-	int cpu;
+  int cpu;
 
-	if (mutex_lock_killable(&vcpu->mutex))
-		return -EINTR;
-	cpu = get_cpu();
-	preempt_notifier_register(&vcpu->preempt_notifier);
-	kvm_arch_vcpu_load(vcpu, cpu);
-	put_cpu();
-	return 0;
+  if (mutex_lock_killable(&vcpu->mutex))
+    return -EINTR;
+  cpu = get_cpu();
+  preempt_notifier_register(&vcpu->preempt_notifier);
+  kvm_arch_vcpu_load(vcpu, cpu);
+  put_cpu();
+  return 0;
 }
 
 struct kvm* nitro_get_vm_by_creator(pid_t creator){
@@ -84,7 +102,7 @@ void nitro_create_vm_hook(struct kvm *kvm){
 }
 
 void nitro_destroy_vm_hook(struct kvm *kvm){
-  struct nitro_event *e;
+  //struct nitro_event *e;
   
   //deinit nitro
   kvm->nitro.traps = 0;
@@ -171,7 +189,7 @@ int nitro_ioctl_continue(struct kvm *kvm){
   if(completion_done(&(kvm->nitro.k_wait_cv)))
     return -1;
   
-  complete_all(&(kvm->nitro.k_wait_cv));
+  nitro_complete_all(kvm,&(kvm->nitro.k_wait_cv));
   return 0;
 }
 
