@@ -32,22 +32,107 @@ void nitro_hash_add(struct kvm *kvm, struct nitro_syscall_event_ht **hnode, ulon
   return;
 }
 
-void nitro_complete_all(struct kvm *kvm, struct completion *x){
-  unsigned long flags;
+int nitro_wait_for_completion(struct nitro_completion *completion){
+  int rv;
   
-  spin_lock_irqsave(&x->wait.lock, flags);
-  x->done += atomic_read(&kvm->online_vcpus);
-  __wake_up_locked(&x->wait, TASK_NORMAL, 0);
-  spin_unlock_irqrestore(&x->wait.lock, flags);
+  DECLARE_WAITQUEUE(wait, current);
+  
+  might_sleep();
+  spin_lock_irq(&completion->wait.lock);
+ 
+  rv = 0;
+  
+  printk(KERN_INFO "nitro: %s: tid %d entering cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  
+  completion->waiters++;
+  __add_wait_queue_tail_exclusive(&completion->wait, &wait);
+  do {
+    if (signal_pending_state(TASK_INTERRUPTIBLE, current)) {
+      rv = -ERESTARTSYS;
+      break;
+    }
+    __set_current_state(TASK_INTERRUPTIBLE);
+    spin_unlock_irq(&completion->wait.lock);
+    schedule_timeout(MAX_SCHEDULE_TIMEOUT);
+    spin_lock_irq(&completion->wait.lock);
+  } while (!completion->done);
+  __remove_wait_queue(&completion->wait, &wait);
+  
+  if (completion->done)
+    completion->done--;
+  
+  if (completion->waiters)
+    completion->waiters--;
+  
+  printk(KERN_INFO "nitro: %s: tid %d leaving cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  spin_unlock_irq(&completion->wait.lock);
+  
+
+  return rv;
 }
 
-void nitro_complete_rest(struct kvm *kvm, struct completion *x){
+int nitro_not_last_wait_for_completion(struct nitro_completion *completion, int compare){
+  long rv;
+  
+  DECLARE_WAITQUEUE(wait, current);
+  
+  might_sleep();
+  spin_lock_irq(&completion->wait.lock);
+  
+  printk(KERN_INFO "nitro: %s: checking if last vcpu with waiters=%d and compare=%d\n",__FUNCTION__,completion->waiters,compare);
+  if(completion->waiters >= compare-1){
+    printk(KERN_INFO "nitro: %s: im the last\n",__FUNCTION__);
+    spin_unlock_irq(&completion->wait.lock);
+    return 0;
+  }
+  
+  rv = 1;
+  
+  printk(KERN_INFO "nitro: %s: tid %d entering cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  
+  completion->waiters++;
+  __add_wait_queue_tail_exclusive(&completion->wait, &wait);
+  do {
+    if (signal_pending_state(TASK_INTERRUPTIBLE, current)) {
+      rv = -ERESTARTSYS;
+      break;
+    }
+    __set_current_state(TASK_INTERRUPTIBLE);
+    spin_unlock_irq(&completion->wait.lock);
+    schedule_timeout(MAX_SCHEDULE_TIMEOUT);
+    spin_lock_irq(&completion->wait.lock);
+  } while (!completion->done);
+  __remove_wait_queue(&completion->wait, &wait);
+  
+  if (completion->done)
+    completion->done--;
+  
+  if (completion->waiters)
+    completion->waiters--;
+  
+  printk(KERN_INFO "nitro: %s: tid %d leaving cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  spin_unlock_irq(&completion->wait.lock);
+
+  return rv;
+}
+
+void nitro_complete_all(struct nitro_completion *completion){
   unsigned long flags;
   
-  spin_lock_irqsave(&x->wait.lock, flags);
-  x->done += atomic_read(&kvm->online_vcpus) - 1;
-  __wake_up_locked(&x->wait, TASK_NORMAL, 0);
-  spin_unlock_irqrestore(&x->wait.lock, flags);
+  spin_lock_irqsave(&completion->wait.lock, flags);
+  completion->done =  completion->waiters;
+  __wake_up_locked(&completion->wait, TASK_NORMAL, 0);
+  spin_unlock_irqrestore(&completion->wait.lock, flags);
+}
+
+bool nitro_completion_num_waiters(struct nitro_completion *completion){
+  unsigned long flags;
+  int ret = 0;
+  
+  spin_lock_irqsave(&completion->wait.lock, flags);
+  ret = completion->waiters;
+  spin_unlock_irqrestore(&completion->wait.lock, flags);
+  return ret;
 }
 
 int nitro_vcpu_load(struct kvm_vcpu *vcpu)
@@ -97,7 +182,11 @@ void nitro_create_vm_hook(struct kvm *kvm){
   kvm->nitro.system_call_max = 0;
   hash_init(kvm->nitro.system_call_rsp_ht);
   
-  init_completion(&(kvm->nitro.k_wait_cv));
+  //init completion
+  kvm->nitro.k_wait_cv.done = 0;
+  kvm->nitro.k_wait_cv.waiters = 0;
+  init_waitqueue_head(&kvm->nitro.k_wait_cv.wait);
+  
   sema_init(&(kvm->nitro.n_wait_sem),0);
 }
 
@@ -186,10 +275,10 @@ int nitro_ioctl_get_event(struct kvm *kvm, void *argp){
 int nitro_ioctl_continue(struct kvm *kvm){
   
   //if no waiters
-  if(completion_done(&(kvm->nitro.k_wait_cv)))
+  if(nitro_completion_num_waiters(&kvm->nitro.k_wait_cv) == 0)
     return -1;
   
-  nitro_complete_all(kvm,&(kvm->nitro.k_wait_cv));
+  nitro_complete_all(&kvm->nitro.k_wait_cv);
   return 0;
 }
 

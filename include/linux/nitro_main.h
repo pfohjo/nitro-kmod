@@ -19,7 +19,6 @@ struct nitro_syscall_event_ht{
 
 struct nitro_event{
   struct list_head q;
-  atomic_t num_waiters;
   unsigned int event_id;
   ulong syscall_event_nr;
   ulong syscall_event_rsp;
@@ -28,12 +27,18 @@ struct nitro_event{
   union event_data user_event_data;
 };
 
+struct nitro_completion {
+  unsigned int done;
+  unsigned int waiters;
+  wait_queue_head_t wait;
+};
+
 struct nitro{
   spinlock_t nitro_lock;
   
   uint32_t traps; //determines which traps are set (e.g., traps | NITRO_TRAP_SYSCALL)
   
-  struct completion k_wait_cv;
+  struct nitro_completion k_wait_cv;
   struct semaphore n_wait_sem;
   
   struct list_head event_q;
@@ -42,19 +47,18 @@ struct nitro{
   unsigned long *system_call_bm; //bitmap determining which system calls to report to userspace
   unsigned int system_call_max;  //the max system call (determines size of system_call_bm)
   DECLARE_HASHTABLE(system_call_rsp_ht,7); //hashtable responsible for matching system calls with returns
-  
-  
-  
 };
 
 struct nitro_vcpu{
   
 };
 
+int nitro_wait_for_completion(struct nitro_completion*);
+int nitro_not_last_wait_for_completion(struct nitro_completion*, int);
+void nitro_complete_all(struct nitro_completion*);
+bool nitro_completion_num_waiters(struct nitro_completion*);
 
 void nitro_hash_add(struct kvm*, struct nitro_syscall_event_ht**, ulong);
-void nitro_complete_all(struct kvm*, struct completion*);
-void nitro_complete_rest(struct kvm*, struct completion*);
   
 int nitro_vcpu_load(struct kvm_vcpu*);
 
