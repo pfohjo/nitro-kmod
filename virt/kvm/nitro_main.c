@@ -42,7 +42,7 @@ int nitro_wait_for_completion(struct nitro_completion *completion){
  
   rv = 0;
   
-  printk(KERN_INFO "nitro: %s: tid %d entering cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  //printk(KERN_INFO "nitro: %s: tid %d entering cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
   
   completion->waiters++;
   __add_wait_queue_tail_exclusive(&completion->wait, &wait);
@@ -64,7 +64,7 @@ int nitro_wait_for_completion(struct nitro_completion *completion){
   if (completion->waiters)
     completion->waiters--;
   
-  printk(KERN_INFO "nitro: %s: tid %d leaving cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  //printk(KERN_INFO "nitro: %s: tid %d leaving cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
   spin_unlock_irq(&completion->wait.lock);
   
 
@@ -79,16 +79,16 @@ int nitro_not_last_wait_for_completion(struct nitro_completion *completion, int 
   might_sleep();
   spin_lock_irq(&completion->wait.lock);
   
-  printk(KERN_INFO "nitro: %s: checking if last vcpu with waiters=%d and compare=%d\n",__FUNCTION__,completion->waiters,compare);
+  //printk(KERN_INFO "nitro: %s: checking if last vcpu with waiters=%d and compare=%d\n",__FUNCTION__,completion->waiters,compare);
   if(completion->waiters >= compare-1){
-    printk(KERN_INFO "nitro: %s: im the last\n",__FUNCTION__);
+    //printk(KERN_INFO "nitro: %s: im the last\n",__FUNCTION__);
     spin_unlock_irq(&completion->wait.lock);
     return 0;
   }
   
   rv = 1;
   
-  printk(KERN_INFO "nitro: %s: tid %d entering cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  //printk(KERN_INFO "nitro: %s: tid %d entering cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
   
   completion->waiters++;
   __add_wait_queue_tail_exclusive(&completion->wait, &wait);
@@ -110,7 +110,7 @@ int nitro_not_last_wait_for_completion(struct nitro_completion *completion, int 
   if (completion->waiters)
     completion->waiters--;
   
-  printk(KERN_INFO "nitro: %s: tid %d leaving cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
+  //printk(KERN_INFO "nitro: %s: tid %d leaving cv with waiters=%d\n",__FUNCTION__,current->tgid,completion->waiters);
   spin_unlock_irq(&completion->wait.lock);
 
   return rv;
@@ -261,11 +261,13 @@ int nitro_ioctl_get_event(struct kvm *kvm, void *argp){
   rv = down_interruptible(&(kvm->nitro.n_wait_sem));
   
   if (rv == 0){
+    spin_lock(&kvm->nitro.nitro_lock);
     e = list_first_entry(&kvm->nitro.event_q,struct nitro_event,q);
+    list_del(&e->q);
+    spin_unlock(&kvm->nitro.nitro_lock);
     rv = e->event_id;
     if (copy_to_user(argp, &e->user_event_data, sizeof(union event_data)))
       rv = -EFAULT;
-    list_del(&e->q);
     kfree(e);
   }
   

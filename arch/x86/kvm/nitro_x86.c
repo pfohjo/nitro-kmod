@@ -96,18 +96,20 @@ int nitro_unset_syscall_trap(struct kvm *kvm){
   return 0;
 }
 
-//this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event, therefore no locks
+//this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event
 void nitro_wait(struct kvm *kvm){
   up(&(kvm->nitro.n_wait_sem));
-  printk(KERN_INFO "nitro: %s: woke up userland, sleeping...\n",__FUNCTION__);
+  //printk(KERN_INFO "nitro: %s: woke up userland, sleeping...\n",__FUNCTION__);
+  spin_unlock(&kvm->nitro.nitro_lock);
   if(nitro_wait_for_completion(&kvm->nitro.k_wait_cv))
     printk(KERN_INFO "nitro: %s: wait interrupted\n",__FUNCTION__);
-  printk(KERN_INFO "nitro: %s: woke up...\n",__FUNCTION__);
+  spin_lock(&kvm->nitro.nitro_lock);
+  //printk(KERN_INFO "nitro: %s: woke up...\n",__FUNCTION__);
   
   return;
 }
 
-//this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event, therefore no locks
+//this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event
 int nitro_report_syscall(struct kvm *kvm, struct nitro_event *e){
   struct nitro_syscall_event_ht *ed;
   
@@ -129,7 +131,7 @@ int nitro_report_syscall(struct kvm *kvm, struct nitro_event *e){
   return 0;
 }
 
-//this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event, therefore no locks
+//this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event
 int nitro_report_sysret(struct kvm *kvm, struct nitro_event *e){
   struct nitro_syscall_event_ht *ed;
   struct hlist_node *tmp;
@@ -138,7 +140,6 @@ int nitro_report_sysret(struct kvm *kvm, struct nitro_event *e){
     if((ed->rsp == e->syscall_event_rsp) && (ed->cr3 == e->syscall_event_cr3)){
       hash_del(&ed->ht);
       kfree(ed);
-      
       nitro_wait(kvm);
       return 0;
     }
@@ -146,6 +147,7 @@ int nitro_report_sysret(struct kvm *kvm, struct nitro_event *e){
   
   list_del(&e->q);
   kfree(e);
+  
   nitro_complete_all(&kvm->nitro.k_wait_cv);
   
   return 0;
@@ -157,56 +159,39 @@ int nitro_report_event(struct kvm *kvm){
   
   r = 0;
   
+  spin_lock(&kvm->nitro.nitro_lock);
+  le = list_empty(&kvm->nitro.event_q);
   
-  
-  
-  
-  /*
-  if(atomic_add_return(1,&e->num_waiters) < atomic_read(&kvm->online_vcpus)){
-    printk(KERN_INFO "nitro: %s: dumb waiter (num_waiters=%d, vcpus=%d)\n",__FUNCTION__,atomic_read(&e->num_waiters),atomic_read(&kvm->online_vcpus));
-    do{
-      if(nitro_wait_for_completion(&kvm->nitro.k_wait_cv)){
-	printk(KERN_INFO "nitro: %s: wait interrupted\n",__FUNCTION__);
-	break;
-      }
-      printk(KERN_INFO "nitro: %s: woke up...\n",__FUNCTION__);
-    }while(!list_empty(&kvm->nitro.event_q));
-    
-    return 0;
-  }
-*/
-  
-  
-
-  do{
+  while(!le){
+    spin_unlock(&kvm->nitro.nitro_lock);
     rv = nitro_not_last_wait_for_completion(&kvm->nitro.k_wait_cv,atomic_read(&kvm->online_vcpus));
-    if(rv == 1)
-      return 0;
-    else if (rv != 0)
+    spin_lock(&kvm->nitro.nitro_lock);
+    if (rv == -ERESTARTSYS){
       printk(KERN_INFO "nitro: %s: wait interrupted\n",__FUNCTION__);
-    
-    spin_lock(&kvm->nitro.nitro_lock);
-    e = list_first_entry(&kvm->nitro.event_q,struct nitro_event,q);
-    spin_unlock(&kvm->nitro.nitro_lock);
-    printk(KERN_INFO "nitro: %s: reporting event %u\n",__FUNCTION__,e->event_id);
-    switch(e->event_id){
-      case KVM_NITRO_EVENT_ERROR:
-	nitro_wait(kvm);
-	break;
-      case KVM_NITRO_EVENT_SYSCALL:
-	r = nitro_report_syscall(kvm,e);
-	break;
-      case KVM_NITRO_EVENT_SYSRET:
-	r = nitro_report_sysret(kvm,e);
-	break;
-      default:
-	printk(KERN_INFO "nitro: %s: unknown event encountered (%d)\n",__FUNCTION__,e->event_id);
+      break;
     }
-    spin_lock(&kvm->nitro.nitro_lock);
+    else if(rv == 0){//if we didnt sleep above
+      e = list_first_entry(&kvm->nitro.event_q,struct nitro_event,q);
+      //printk(KERN_INFO "nitro: %s: reporting event %u\n",__FUNCTION__,e->event_id);
+      switch(e->event_id){
+	case KVM_NITRO_EVENT_ERROR:
+	  nitro_wait(kvm);
+	  break;
+	case KVM_NITRO_EVENT_SYSCALL:
+	  r = nitro_report_syscall(kvm,e);
+	  break;
+	case KVM_NITRO_EVENT_SYSRET:
+	  r = nitro_report_sysret(kvm,e);
+	  break;
+	default:
+	  printk(KERN_INFO "nitro: %s: unknown event encountered (%d)\n",__FUNCTION__,e->event_id);
+      }
+    }
+    
     le = list_empty(&kvm->nitro.event_q);
-    spin_unlock(&kvm->nitro.nitro_lock);
-  }while(!le);
-
+    
+  }
+  spin_unlock(&kvm->nitro.nitro_lock);
   return r;
 }
 
