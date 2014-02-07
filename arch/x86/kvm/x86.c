@@ -6131,7 +6131,7 @@ static int __vcpu_run(struct kvm_vcpu *vcpu)
 		if (r <= 0)
 			break;
 		
-		nitro_report_event(kvm);
+		nitro_report_event(vcpu);
 
 		clear_bit(KVM_REQ_PENDING_TIMER, &vcpu->requests);
 		if (kvm_cpu_has_pending_timer(vcpu))

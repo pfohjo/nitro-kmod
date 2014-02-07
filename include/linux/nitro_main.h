@@ -38,7 +38,7 @@ struct nitro{
   
   uint32_t traps; //determines which traps are set (e.g., traps | NITRO_TRAP_SYSCALL)
   
-  struct nitro_completion k_wait_cv;
+  struct completion k_wait_cv;
   struct semaphore n_wait_sem;
   
   struct list_head event_q;
@@ -50,8 +50,11 @@ struct nitro{
 };
 
 struct nitro_vcpu{
-  
+  wait_queue_head_t wait;
 };
+
+void nitro_pause(struct kvm_vcpu*);
+void nitro_unpause(struct kvm_vcpu*);
 
 int nitro_wait_for_completion(struct nitro_completion*);
 int nitro_not_last_wait_for_completion(struct nitro_completion*, int);

@@ -8,6 +8,7 @@
 #include <asm-generic/errno-base.h>
 #include <linux/preempt.h>
 #include <linux/hashtable.h>
+#include <linux/sched.h>
 
 #include <linux/kvm_host.h>
 
@@ -29,6 +30,43 @@ void nitro_hash_add(struct kvm *kvm, struct nitro_syscall_event_ht **hnode, ulon
   }
   
   hash_add(kvm->nitro.system_call_rsp_ht,&((*hnode)->ht),key);
+  return;
+}
+
+void nitro_pause(struct kvm_vcpu *vcpu){
+  int i;
+  struct kvm_vcpu *cur;
+  struct task_struct *task;
+  
+  kvm_for_each_vcpu(i, cur, vcpu->kvm){
+    if(cur != vcpu){
+      printk(KERN_INFO "nitro: %s: pausing thread!\n",__FUNCTION__);
+      task = get_pid_task(vcpu->pid,PIDTYPE_PID);
+      
+      //I have no clue wtf this is, I stole it from sched.h
+      //do { task->state = TASK_INTERRUPTIBLE; } while (0);
+      set_mb(task->state, TASK_INTERRUPTIBLE);
+    }
+  }
+
+  
+  return;
+}
+
+void nitro_unpause(struct kvm_vcpu *vcpu){
+  int i;
+  struct kvm_vcpu *cur;
+  struct task_struct *task;
+  
+  kvm_for_each_vcpu(i, cur, vcpu->kvm){
+    if(cur != vcpu){
+      printk(KERN_INFO "nitro: %s: unpausing thread!\n",__FUNCTION__);
+      task = get_pid_task(vcpu->pid,PIDTYPE_PID);
+      wake_up_process(task);
+    }
+  }
+
+  
   return;
 }
 
@@ -182,12 +220,8 @@ void nitro_create_vm_hook(struct kvm *kvm){
   kvm->nitro.system_call_max = 0;
   hash_init(kvm->nitro.system_call_rsp_ht);
   
-  //init completion
-  kvm->nitro.k_wait_cv.done = 0;
-  kvm->nitro.k_wait_cv.waiters = 0;
-  init_waitqueue_head(&kvm->nitro.k_wait_cv.wait);
-  
   sema_init(&(kvm->nitro.n_wait_sem),0);
+  init_completion(&kvm->nitro.k_wait_cv);
 }
 
 void nitro_destroy_vm_hook(struct kvm *kvm){
@@ -204,6 +238,7 @@ void nitro_destroy_vm_hook(struct kvm *kvm){
 }
 
 void nitro_create_vcpu_hook(struct kvm_vcpu *vcpu){
+  //vcpu->nitro.wait = __WAIT_QUEUE_HEAD_INITIALIZER(vcpu->nitro.wait);
 }
 
 void nitro_destroy_vcpu_hook(struct kvm_vcpu *vcpu){
@@ -277,10 +312,10 @@ int nitro_ioctl_get_event(struct kvm *kvm, void *argp){
 int nitro_ioctl_continue(struct kvm *kvm){
   
   //if no waiters
-  if(nitro_completion_num_waiters(&kvm->nitro.k_wait_cv) == 0)
-    return -1;
+  //if(completion_done(&kvm->nitro.k_wait_cv))
+  //  return -1;
   
-  nitro_complete_all(&kvm->nitro.k_wait_cv);
+  complete(&kvm->nitro.k_wait_cv);
   return 0;
 }
 
