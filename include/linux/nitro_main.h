@@ -35,6 +35,7 @@ struct nitro_completion {
 
 struct nitro{
   spinlock_t nitro_lock;
+  struct mutex nitro_report_lock;
   
   uint32_t traps; //determines which traps are set (e.g., traps | NITRO_TRAP_SYSCALL)
   

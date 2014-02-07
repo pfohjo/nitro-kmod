@@ -33,6 +33,28 @@ void nitro_hash_add(struct kvm *kvm, struct nitro_syscall_event_ht **hnode, ulon
   return;
 }
 
+void nitro_resched_task(struct task_struct *p){
+  int cpu;
+
+  //lockdep_assert_held(&task_rq(p)->lock);
+
+  if (test_tsk_need_resched(p))
+    return;
+
+  set_tsk_need_resched(p);
+
+  cpu = task_cpu(p);
+  if (cpu == smp_processor_id()) {
+    set_preempt_need_resched();
+    return;
+  }
+
+  /* NEED_RESCHED must be visible before we test polling */
+  smp_mb();
+  if (!tsk_is_polling(p))
+    smp_send_reschedule(cpu);
+}
+
 void nitro_pause(struct kvm_vcpu *vcpu){
   int i;
   struct kvm_vcpu *cur;
@@ -40,16 +62,24 @@ void nitro_pause(struct kvm_vcpu *vcpu){
   
   kvm_for_each_vcpu(i, cur, vcpu->kvm){
     if(cur != vcpu){
-      printk(KERN_INFO "nitro: %s: pausing thread!\n",__FUNCTION__);
-      task = get_pid_task(vcpu->pid,PIDTYPE_PID);
+      nitro_vcpu_load(cur);
       
-      //I have no clue wtf this is, I stole it from sched.h
-      //do { task->state = TASK_INTERRUPTIBLE; } while (0);
-      set_mb(task->state, TASK_INTERRUPTIBLE);
+      task = get_pid_task(cur->pid,PIDTYPE_PID);
+      printk(KERN_INFO "nitro: %s: vcpu %d pausing vcpu %d with current state %ld\n",__FUNCTION__,vcpu->vcpu_id,cur->vcpu_id,task->state);
+      
+      //write_lock(&tasklist_lock);
+      // __set_task_state(task,TASK_INTERRUPTIBLE);
+      set_task_state(task,TASK_UNINTERRUPTIBLE);
+      //write_unlock(&tasklist_lock);
+      
+      
+      //look at kvm_vcpu_kick and kvm_resched in kvm_main.c
+      nitro_resched_task(task);
+      
+      vcpu_put(cur);
     }
   }
 
-  
   return;
 }
 
@@ -60,8 +90,8 @@ void nitro_unpause(struct kvm_vcpu *vcpu){
   
   kvm_for_each_vcpu(i, cur, vcpu->kvm){
     if(cur != vcpu){
-      printk(KERN_INFO "nitro: %s: unpausing thread!\n",__FUNCTION__);
-      task = get_pid_task(vcpu->pid,PIDTYPE_PID);
+      task = get_pid_task(cur->pid,PIDTYPE_PID);
+      printk(KERN_INFO "nitro: %s: vcpu %d waking up vcpu %d with current state %ld\n",__FUNCTION__,vcpu->vcpu_id,cur->vcpu_id,task->state);
       wake_up_process(task);
     }
   }
@@ -212,6 +242,7 @@ void nitro_create_vm_hook(struct kvm *kvm){
   
   //init nitro
   spin_lock_init(&kvm->nitro.nitro_lock);
+  mutex_init(&kvm->nitro.nitro_report_lock);
   
   kvm->nitro.traps = 0;
   INIT_LIST_HEAD(&kvm->nitro.event_q);

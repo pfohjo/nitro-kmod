@@ -22,10 +22,9 @@ int nitro_set_syscall_trap(struct kvm *kvm,unsigned long *bitmap,int system_call
   kvm->nitro.system_call_max = system_call_max;
     
   //init completion
-  init_completion(&kvm->nitro.k_wait_cv);
+  reinit_completion(&kvm->nitro.k_wait_cv);
   
   kvm->nitro.traps |= NITRO_TRAP_SYSCALL;
-  
   
   kvm_for_each_vcpu(i, vcpu, kvm){
     //vcpu_load(vcpu);
@@ -120,16 +119,21 @@ int nitro_unset_syscall_trap(struct kvm *kvm){
 }
 
 //this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event
-int nitro_wait(struct kvm *kvm){
+int nitro_wait(struct kvm_vcpu *vcpu){
   int rv = 0;
+  struct kvm *kvm;
+  
+  kvm = vcpu->kvm;
   
   up(&(kvm->nitro.n_wait_sem));
   //printk(KERN_INFO "nitro: %s: woke up userland, sleeping...\n",__FUNCTION__);
   spin_unlock(&kvm->nitro.nitro_lock);
+  nitro_pause(vcpu);
   if(wait_for_completion_interruptible(&kvm->nitro.k_wait_cv)){
     printk(KERN_INFO "nitro: %s: wait interrupted\n",__FUNCTION__);
     rv = -1;
   }
+  nitro_unpause(vcpu);
   spin_lock(&kvm->nitro.nitro_lock);
   //printk(KERN_INFO "nitro: %s: woke up...\n",__FUNCTION__);
   
@@ -137,9 +141,11 @@ int nitro_wait(struct kvm *kvm){
 }
 
 //this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event
-int nitro_report_syscall(struct kvm *kvm, struct nitro_event *e){
+int nitro_report_syscall(struct kvm_vcpu *vcpu, struct nitro_event *e){
   struct nitro_syscall_event_ht *ed;
+  struct kvm *kvm;
   
+  kvm = vcpu->kvm;
   
   if(kvm->nitro.system_call_max > 0 && (e->syscall_event_nr > INT_MAX || e->syscall_event_nr > kvm->nitro.system_call_max || !test_bit((int)e->syscall_event_nr,kvm->nitro.system_call_bm))){
     list_del(&e->q);
@@ -152,19 +158,19 @@ int nitro_report_syscall(struct kvm *kvm, struct nitro_event *e){
   ed->cr3 = e->syscall_event_cr3;
   nitro_hash_add(kvm,&ed,ed->rsp);
 
-  return nitro_wait(kvm);
+  return nitro_wait(vcpu);
 }
 
 //this function assumes only last vcpu will enter once all others have been put to sleep in nitro_report_event
-int nitro_report_sysret(struct kvm *kvm, struct nitro_event *e){
+int nitro_report_sysret(struct kvm_vcpu *vcpu, struct nitro_event *e){
   struct nitro_syscall_event_ht *ed;
   struct hlist_node *tmp;
   
-  hash_for_each_possible_safe(kvm->nitro.system_call_rsp_ht, ed, tmp, ht, e->syscall_event_rsp){
+  hash_for_each_possible_safe(vcpu->kvm->nitro.system_call_rsp_ht, ed, tmp, ht, e->syscall_event_rsp){
     if((ed->rsp == e->syscall_event_rsp) && (ed->cr3 == e->syscall_event_cr3)){
       hash_del(&ed->ht);
       kfree(ed);
-      return nitro_wait(kvm);
+      return nitro_wait(vcpu);
     }
   }
   
@@ -182,17 +188,20 @@ int nitro_report_event(struct kvm_vcpu *vcpu){
   r = 0;
   kvm = vcpu->kvm;
   
+  if(!mutex_trylock(&kvm->nitro.nitro_report_lock))
+    return 0;
+  
   spin_lock(&kvm->nitro.nitro_lock);
   le = list_empty(&kvm->nitro.event_q);
   
   if(le){
     spin_unlock(&kvm->nitro.nitro_lock);
+    mutex_unlock(&kvm->nitro.nitro_report_lock);
     return 0;
   }
   
   
-  //nitro_pause(vcpu);
-  //threadgroup_lock(current);
+  
   
   do{
     
@@ -200,13 +209,13 @@ int nitro_report_event(struct kvm_vcpu *vcpu){
     //printk(KERN_INFO "nitro: %s: reporting event %u\n",__FUNCTION__,e->event_id);
     switch(e->event_id){
       case KVM_NITRO_EVENT_ERROR:
-	r = nitro_wait(kvm);
+	r = nitro_wait(vcpu);
 	break;
       case KVM_NITRO_EVENT_SYSCALL:
-	r = nitro_report_syscall(kvm,e);
+	r = nitro_report_syscall(vcpu,e);
 	break;
       case KVM_NITRO_EVENT_SYSRET:
-	r = nitro_report_sysret(kvm,e);
+	r = nitro_report_sysret(vcpu,e);
 	break;
       default:
 	printk(KERN_INFO "nitro: %s: unknown event encountered (%d)\n",__FUNCTION__,e->event_id);
@@ -221,9 +230,8 @@ int nitro_report_event(struct kvm_vcpu *vcpu){
     le = list_empty(&kvm->nitro.event_q);
     
   }while(!le);
-  //nitro_unpause(vcpu);
-  //threadgroup_unlock(current);
   spin_unlock(&kvm->nitro.nitro_lock);
+  mutex_unlock(&kvm->nitro.nitro_report_lock);
   return r;
 }
 
