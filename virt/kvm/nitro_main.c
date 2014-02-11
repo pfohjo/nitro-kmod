@@ -32,7 +32,7 @@ void nitro_hash_add(struct kvm *kvm, struct nitro_syscall_event_ht **hnode, ulon
   hash_add(kvm->nitro.system_call_rsp_ht,&((*hnode)->ht),key);
   return;
 }
-
+/*
 void nitro_resched_task(struct task_struct *p){
   int cpu;
 
@@ -49,11 +49,12 @@ void nitro_resched_task(struct task_struct *p){
     return;
   }
 
-  /* NEED_RESCHED must be visible before we test polling */
+  // NEED_RESCHED must be visible before we test polling 
   smp_mb();
   if (!tsk_is_polling(p))
     smp_send_reschedule(cpu);
 }
+*/
 
 void nitro_pause(struct kvm_vcpu *vcpu){
   int i;
@@ -62,6 +63,8 @@ void nitro_pause(struct kvm_vcpu *vcpu){
   
   kvm_for_each_vcpu(i, cur, vcpu->kvm){
     if(cur != vcpu){
+      
+      /*
       nitro_vcpu_load(cur);
       
       task = get_pid_task(cur->pid,PIDTYPE_PID);
@@ -77,6 +80,16 @@ void nitro_pause(struct kvm_vcpu *vcpu){
       nitro_resched_task(task);
       
       vcpu_put(cur);
+      */
+      
+      task = get_pid_task(cur->pid,PIDTYPE_PID);
+      printk(KERN_INFO "nitro: %s: vcpu %d pausing vcpu %d with current state %ld\n",__FUNCTION__,vcpu->vcpu_id,cur->vcpu_id,task->state);
+      
+      sigaddset(&task->pending.signal, SIGSTOP);
+      set_tsk_thread_flag(task, TIF_SIGPENDING);
+//      if (!wake_up_state(task, TASK_WAKEKILL | TASK_INTERRUPTIBLE))
+//	kick_process(task);
+      
     }
   }
 
@@ -90,9 +103,19 @@ void nitro_unpause(struct kvm_vcpu *vcpu){
   
   kvm_for_each_vcpu(i, cur, vcpu->kvm){
     if(cur != vcpu){
+      /*
       task = get_pid_task(cur->pid,PIDTYPE_PID);
       printk(KERN_INFO "nitro: %s: vcpu %d waking up vcpu %d with current state %ld\n",__FUNCTION__,vcpu->vcpu_id,cur->vcpu_id,task->state);
       wake_up_process(task);
+      */
+      
+      task = get_pid_task(cur->pid,PIDTYPE_PID);
+      printk(KERN_INFO "nitro: %s: vcpu %d waking up vcpu %d with current state %ld\n",__FUNCTION__,vcpu->vcpu_id,cur->vcpu_id,task->state);
+      sigaddset(&task->pending.signal, SIGCONT);
+      set_tsk_thread_flag(task, TIF_SIGPENDING);
+//    if (!wake_up_state(task, TASK_WAKEKILL | TASK_INTERRUPTIBLE))
+//	kick_process(task);
+      
     }
   }
 

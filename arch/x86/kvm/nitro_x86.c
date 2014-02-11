@@ -22,7 +22,7 @@ int nitro_set_syscall_trap(struct kvm *kvm,unsigned long *bitmap,int system_call
   kvm->nitro.system_call_max = system_call_max;
     
   //init completion
-  reinit_completion(&kvm->nitro.k_wait_cv);
+  init_completion(&kvm->nitro.k_wait_cv);
   
   kvm->nitro.traps |= NITRO_TRAP_SYSCALL;
   
@@ -129,8 +129,8 @@ int nitro_wait(struct kvm_vcpu *vcpu){
   //printk(KERN_INFO "nitro: %s: woke up userland, sleeping...\n",__FUNCTION__);
   spin_unlock(&kvm->nitro.nitro_lock);
   nitro_pause(vcpu);
-  if(wait_for_completion_interruptible(&kvm->nitro.k_wait_cv)){
-    printk(KERN_INFO "nitro: %s: wait interrupted\n",__FUNCTION__);
+  if(wait_for_completion_killable(&kvm->nitro.k_wait_cv)){
+    printk(KERN_INFO "nitro: %s: vcpu %d wait interrupted with kill\n",__FUNCTION__,vcpu->vcpu_id);
     rv = -1;
   }
   nitro_unpause(vcpu);
@@ -188,8 +188,10 @@ int nitro_report_event(struct kvm_vcpu *vcpu){
   r = 0;
   kvm = vcpu->kvm;
   
-  if(!mutex_trylock(&kvm->nitro.nitro_report_lock))
-    return 0;
+  //if(!mutex_trylock(&kvm->nitro.nitro_report_lock))
+  //  return 0;
+  
+  mutex_lock(&kvm->nitro.nitro_report_lock);
   
   spin_lock(&kvm->nitro.nitro_lock);
   le = list_empty(&kvm->nitro.event_q);
