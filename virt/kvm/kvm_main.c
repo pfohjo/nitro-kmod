@@ -2568,7 +2568,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		int i;
 		struct nitro_vcpus nvcpus;
 
-		r = nitro_iotcl_attach_vcpus(kvm,&nvcpus);
+		r = nitro_ioctl_attach_vcpus(kvm,&nvcpus);
 		if (r)
 			goto out;
 
@@ -2734,7 +2734,7 @@ static long kvm_dev_ioctl(struct file *filp,
 		r = -EOPNOTSUPP;
 		break;
 	case KVM_NITRO_NUM_VMS:
-		r = nitro_iotcl_num_vms();
+		r = nitro_ioctl_num_vms();
 		break;
 	case KVM_NITRO_ATTACH_VM: {
 		pid_t creator;

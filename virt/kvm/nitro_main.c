@@ -96,7 +96,7 @@ void nitro_destroy_vcpu_hook(struct kvm_vcpu *vcpu){
   vcpu->nitro.event = 0;
 }
 
-int nitro_iotcl_num_vms(void){
+int nitro_ioctl_num_vms(void){
   struct kvm *kvm;
   int rv = 0;
   
@@ -108,7 +108,7 @@ int nitro_iotcl_num_vms(void){
   return rv;
 }
 
-int nitro_iotcl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
+int nitro_ioctl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
   int r,i;
   struct kvm_vcpu *v;
   
