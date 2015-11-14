@@ -109,7 +109,7 @@ int nitro_ioctl_num_vms(void){
 }
 
 int nitro_ioctl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
-  int r,i;
+  int cpu_i;
   struct kvm_vcpu *v;
   
   mutex_lock(&kvm->lock);
@@ -119,14 +119,16 @@ int nitro_ioctl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
     goto error_out;
   }
   
-  kvm_for_each_vcpu(r, v, kvm){
-    nvcpus->ids[r] = v->vcpu_id;
+  kvm_for_each_vcpu(cpu_i, v, kvm){
+    nvcpus->ids[cpu_i] = v->vcpu_id;
     kvm_get_kvm(kvm);
-    nvcpus->fds[r] = create_vcpu_fd(v);
-    if(nvcpus->fds[r]<0){
-      for(i=r;r>=0;i--){
-	nvcpus->ids[r] = 0;
-	nvcpus->fds[i] = 0;
+    nvcpus->fds[cpu_i] = create_vcpu_fd(v);
+
+    if(nvcpus->fds[cpu_i] < 0){
+      int to_reset_i;
+
+      for(to_reset_i = cpu_i; to_reset_i >= 0; to_reset_i--){
+	nvcpus->fds[to_reset_i] = 0;
 	kvm_put_kvm(kvm);
       }
       goto error_out;
