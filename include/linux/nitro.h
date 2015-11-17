@@ -44,5 +44,7 @@ union event_data{
 #define KVM_NITRO_SET_REGS              _IOW(KVMIO,  0xE8, struct kvm_regs)
 #define KVM_NITRO_GET_SREGS             _IOR(KVMIO,  0xE9, struct kvm_sregs)
 #define KVM_NITRO_SET_SREGS             _IOW(KVMIO,  0xEA, struct kvm_sregs)
+#define KVM_NITRO_TRANSLATE		_IOWR(KVMIO, 0xEB, \
+					      struct kvm_translation)
 
 #endif //NITRO_H_

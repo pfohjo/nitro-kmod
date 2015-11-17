@@ -2044,6 +2044,21 @@ out_free2:
 		r = kvm_arch_vcpu_ioctl_set_sregs(vcpu, kvm_sregs);
 		goto out_no_put;
 	}
+	case KVM_NITRO_TRANSLATE: {
+		struct kvm_translation tr;
+
+		r = -EFAULT;
+		if (copy_from_user(&tr, argp, sizeof tr))
+			goto out_no_put;
+		r = kvm_arch_vcpu_ioctl_translate(vcpu, &tr);
+		if (r)
+			goto out_no_put;
+		r = -EFAULT;
+		if (copy_to_user(argp, &tr, sizeof tr))
+			goto out_no_put;
+		r = 0;
+		goto out_no_put;
+	}
 #if defined(CONFIG_S390) || defined(CONFIG_PPC) || defined(CONFIG_MIPS)
 	case KVM_S390_INTERRUPT:
 	case KVM_INTERRUPT:
