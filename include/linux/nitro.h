@@ -37,6 +37,8 @@ union event_data{
 					     struct nitro_syscall_trap)
 #define KVM_NITRO_UNSET_SYSCALL_TRAP	_IO(KVMIO, 0xE4)
 #define KVM_NITRO_SET_ALL_SYSCALL_TRAP	_IO(KVMIO, 0xE5)
+#define KVM_NITRO_ADD_PROCESS_TRAP	_IOW(KVMIO, 0xE6, ulong)
+#define KVM_NITRO_REMOVE_PROCESS_TRAP	_IOW(KVMIO, 0xE7, ulong)
 
 //VCPU functions
 #define KVM_NITRO_GET_EVENT	_IOR(KVMIO, 0xE8, union event_data)

@@ -34,7 +34,35 @@ struct nitro {
 	unsigned int system_call_max;
 	/* The prior syscall events, for checking against return events. */
 	DECLARE_HASHTABLE(system_call_rsp_ht,7);
+	/*
+	 * The list of processes to watch, if any are specified.
+	 * If none are specified, all processes are watched.
+	 * Therefore this field does not determine
+	 * if system call trapping should be active.
+	 */
+	DECLARE_HASHTABLE(process_watch_ht, 6);
 };
+
+/*
+ * An entry in the process_watch_ht hash table of struct nitro,
+ * Contains the cr3 value identifying the process.
+ */
+struct nitro_process_node {
+	/* Identifies the watched process. */
+	ulong cr3;
+	/* node inside the hash table */
+	struct hlist_node node;
+};
+
+/*
+ * Remove and free a process from process_watch_ht.
+ * @param process_node	the node holding the process to remove.
+ */
+inline static void remove_process(struct nitro_process_node *process_node)
+{
+	hash_del(&process_node->node);
+	kfree(process_node);
+}
 
 /*
  * Stop watching any system calls.
@@ -42,6 +70,9 @@ struct nitro {
  */
 inline static void clear_settings(struct nitro *nitro)
 {
+	struct nitro_process_node *process_node;
+	int dummy_bkt;
+
 	mutex_lock(&nitro->settings_lock);
 
 	if (nitro->system_call_bm != NULL) {
@@ -52,6 +83,10 @@ inline static void clear_settings(struct nitro *nitro)
 		kfree(system_call_bm);
 	} else if (nitro->watch_all_syscalls)
 		nitro->watch_all_syscalls = false;
+
+	hash_for_each(nitro->process_watch_ht, dummy_bkt, process_node, node) {
+		remove_process(process_node);
+	}
 
 	mutex_unlock(&nitro->settings_lock);
 }

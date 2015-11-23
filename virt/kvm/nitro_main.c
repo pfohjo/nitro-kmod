@@ -76,6 +76,7 @@ void nitro_create_vm_hook(struct kvm *kvm){
 	nitro->system_call_max = 0;
 	nitro->watch_all_syscalls = false;
 	hash_init(nitro->system_call_rsp_ht);
+	hash_init(nitro->process_watch_ht);
 	mutex_init(&nitro->settings_lock);
 }
 

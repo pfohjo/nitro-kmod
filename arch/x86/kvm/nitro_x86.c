@@ -9,6 +9,40 @@
 extern int kvm_set_msr_common(struct kvm_vcpu*, struct msr_data*);
 
 /*
+ * Assuming that no other thread is accessing the settings,
+ * check if system call watching has already been disabled.
+ * @param nitro	contains the system call settings
+ * @return	true iff the settings specify neither specific system calls,
+ *		nor that all system calls should be watched
+ */
+inline static bool _ignore_events(struct nitro *nitro)
+{
+	bool ignore;
+
+	ignore = (nitro->system_call_bm == NULL) && !nitro->watch_all_syscalls;
+
+	return ignore;
+}
+
+/*
+ * Thread safe version of _ignore_events.
+ * Check if system call watching has already been disabled.
+ * @param nitro	contains the system call settings
+ * @return	true iff the settings specify neither specific system calls,
+ *		nor that all system calls should be watched
+ */
+inline static bool ignore_events(struct nitro *nitro)
+{
+	bool ignore;
+
+	mutex_lock(&nitro->settings_lock);
+	ignore = _ignore_events(nitro);
+	mutex_unlock(&nitro->settings_lock);
+
+	return ignore;
+}
+
+/*
  * Common function following the activation of any system call watching.
  * @param kvm	the virtual-machine-wide state to enable system call trapping
  *		for all vcpus
@@ -46,9 +80,11 @@ int nitro_set_syscall_trap(struct kvm *kvm, unsigned long *bitmap,
 			   int system_call_max)
 {
 	struct nitro *nitro = &kvm->nitro;
+	bool ignored;
 	printk(KERN_INFO "nitro: set syscall trap\n");
 
 	mutex_lock(&nitro->settings_lock);
+	ignored = _ignore_events(nitro);
 	if (nitro->watch_all_syscalls)
 		kfree(bitmap); /* All system calls are already watched. */
 	else if (nitro->system_call_bm == NULL) {
@@ -82,7 +118,8 @@ int nitro_set_syscall_trap(struct kvm *kvm, unsigned long *bitmap,
 	}
 	mutex_unlock(&nitro->settings_lock);
 
-	nitro_activate_syscall_trap(kvm);
+	if (ignored)
+		nitro_activate_syscall_trap(kvm);
 
 	return 0;
 }
@@ -90,9 +127,11 @@ int nitro_set_syscall_trap(struct kvm *kvm, unsigned long *bitmap,
 int nitro_set_all_syscall_trap(struct kvm *kvm)
 {
 	struct nitro *nitro = &kvm->nitro;
+	bool ignored;
 	printk(KERN_INFO "nitro: set all syscall trap\n");
 
 	mutex_lock(&nitro->settings_lock);
+	ignored = _ignore_events(nitro);
 	nitro->watch_all_syscalls = true;
 	if (nitro->system_call_bm != NULL) {
 		kfree(nitro->system_call_bm);
@@ -101,7 +140,8 @@ int nitro_set_all_syscall_trap(struct kvm *kvm)
 	}
 	mutex_unlock(&nitro->settings_lock);
 
-	nitro_activate_syscall_trap(kvm);
+	if (ignored)
+		nitro_activate_syscall_trap(kvm);
 
 	return 0;
 }
@@ -114,6 +154,67 @@ static inline void free_event_entry(struct nitro_syscall_event_ht *event_entry)
 {
 	hash_del(&event_entry->ht);
 	kfree(event_entry);
+}
+
+int nitro_add_process_trap(struct kvm *kvm, ulong process_cr3)
+{
+	struct nitro *nitro = &kvm->nitro;
+	bool is_new = true;
+	struct nitro_process_node *old_process;
+	int ret;
+	printk(KERN_INFO "nitro: add process trap\n");
+
+	mutex_lock(&nitro->settings_lock);
+	hash_for_each_possible(nitro->process_watch_ht, old_process, node,
+			       process_cr3) {
+		if(old_process->cr3 == process_cr3) {
+			is_new = false;
+			break;
+		}
+	}
+
+	if (is_new) {
+		struct nitro_process_node *
+		new_process = kmalloc(sizeof(struct nitro_process_node),
+				      GFP_KERNEL);
+
+		if (new_process == NULL) {
+			ret = -ENOMEM;
+		} else {
+			new_process->cr3 = process_cr3;
+			printk(KERN_INFO "Going to add new process 0x%lx\n",
+			       process_cr3);
+			hash_add(nitro->process_watch_ht, &new_process->node,
+				 process_cr3);
+			ret = 0;
+		}
+	} else {
+		ret = -EINVAL;
+	}
+	mutex_unlock(&nitro->settings_lock);
+
+	return ret;
+}
+
+int nitro_remove_process_trap(struct kvm *kvm, ulong process_cr3)
+{
+	struct nitro *nitro = &kvm->nitro;
+	struct nitro_process_node *process_node;
+	bool found = false;
+	printk(KERN_INFO "nitro: remove process trap\n");
+
+	mutex_lock(&nitro->settings_lock);
+	hash_for_each_possible(nitro->process_watch_ht, process_node, node,
+			       process_cr3) {
+		if(process_node->cr3 == process_cr3) {
+			remove_process(process_node);
+			found = true;
+			break;
+		}
+	}
+	mutex_unlock(&nitro->settings_lock);
+
+	return found ? 0 : -EINVAL;
 }
 
 int nitro_unset_syscall_trap(struct kvm *kvm)
@@ -189,59 +290,63 @@ void nitro_wait(struct kvm_vcpu *vcpu)
 
 int nitro_report_syscall(struct kvm_vcpu *vcpu)
 {
+	bool care = true;
 	struct kvm *kvm;
-	struct nitro *nitro;
+	struct nitro *nitro_kvm;
+	struct nitro_vcpu *nitro_vcpu;
+	ulong syscall_event_cr3;
 	unsigned long syscall_nr;
 	struct nitro_syscall_event_ht *ed;
-	int care = 1;
 
 	kvm = vcpu->kvm;
-	nitro = &kvm->nitro;
+	nitro_kvm = &kvm->nitro;
+	nitro_vcpu = &vcpu->nitro;
+	syscall_event_cr3 = nitro_vcpu->syscall_event_cr3;
 
-	mutex_lock(&nitro->settings_lock);
-	if (nitro->system_call_bm != NULL) {
+	mutex_lock(&nitro_kvm->settings_lock);
+	if (nitro_kvm->system_call_bm != NULL) {
 		syscall_nr = kvm_register_read(vcpu, VCPU_REGS_RAX);
 
 		if (syscall_nr > INT_MAX ||
-		    syscall_nr > nitro->system_call_max ||
-		    !test_bit((int) syscall_nr, nitro->system_call_bm))
-			care = 0;
-	} else if (!nitro->watch_all_syscalls)
-		care = 0;
-	mutex_unlock(&nitro->settings_lock);
+		    syscall_nr > nitro_kvm->system_call_max ||
+		    !test_bit((int) syscall_nr, nitro_kvm->system_call_bm))
+			care = false;
+	} else if (!nitro_kvm->watch_all_syscalls)
+		care = false;
+
+	/*
+	 * Check if processes are specified, and if so,
+	 * if the calling process is in the set of watched processes.
+	 * If processes are not specified, report all processes
+	 * that made a watched system call.
+	 */
+	if (care && !hash_empty(nitro_kvm->process_watch_ht)) {
+		struct nitro_process_node *process_node;
+		care = false;
+
+		hash_for_each_possible(nitro_kvm->process_watch_ht,
+				       process_node, node, syscall_event_cr3) {
+			if (process_node->cr3 == syscall_event_cr3) {
+				care = true;
+				break;
+			}
+		}
+	}
+	mutex_unlock(&nitro_kvm->settings_lock);
 
 	if (care) {
 		ed = kzalloc(sizeof(struct nitro_syscall_event_ht),GFP_KERNEL);
-		ed->rsp = vcpu->nitro.syscall_event_rsp;
-		ed->cr3 = vcpu->nitro.syscall_event_cr3;
-		nitro_hash_add(kvm,&ed,ed->rsp);
+		ed->rsp = nitro_vcpu->syscall_event_rsp;
+		ed->cr3 = syscall_event_cr3;
+		nitro_hash_add(kvm, &ed, ed->rsp);
 
-		memset(&vcpu->nitro.event_data, 0, sizeof(union event_data));
-		vcpu->nitro.event_data.syscall = vcpu->nitro.syscall_event_rsp;
+		memset(&nitro_vcpu->event_data, 0, sizeof(union event_data));
+		nitro_vcpu->event_data.syscall = nitro_vcpu->syscall_event_rsp;
 
 		nitro_wait(vcpu);
 	}
 
 	return 0;
-}
-
-/*
- * Check if system call watching has already been disabled.
- * @param nitro	contains the system call settings
- * @return	true iff the settings specify neither specific system calls,
- *		nor that all system calls should be watched
- */
-inline static bool ignore_events(struct nitro *nitro)
-{
-	bool ignore;
-
-	mutex_lock(&nitro->settings_lock);
-
-	ignore = (nitro->system_call_bm == NULL) && !nitro->watch_all_syscalls;
-
-	mutex_unlock(&nitro->settings_lock);
-
-	return ignore;
 }
 
 int nitro_report_sysret(struct kvm_vcpu *vcpu){

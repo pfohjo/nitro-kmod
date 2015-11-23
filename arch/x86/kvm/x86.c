@@ -3927,6 +3927,28 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		r = nitro_set_all_syscall_trap(kvm);
 		break;
 	}
+	case KVM_NITRO_ADD_PROCESS_TRAP: {
+		ulong process_cr3;
+
+		if (copy_from_user(&process_cr3, argp, sizeof(process_cr3))) {
+			r = -EFAULT;
+			goto out;
+		}
+
+		r = nitro_add_process_trap(kvm, process_cr3);
+		break;
+	}
+	case KVM_NITRO_REMOVE_PROCESS_TRAP: {
+		ulong process_cr3;
+
+		if (copy_from_user(&process_cr3, argp, sizeof(process_cr3))) {
+			r = -EFAULT;
+			goto out;
+		}
+
+		r = nitro_remove_process_trap(kvm, process_cr3);
+		break;
+	}
 
 	default:
 		;
