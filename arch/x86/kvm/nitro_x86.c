@@ -309,6 +309,14 @@ int nitro_report_syscall(struct kvm_vcpu *vcpu)
 
 	if (care) {
 		ed = kzalloc(sizeof(struct nitro_syscall_event_ht),GFP_KERNEL);
+
+		if (ed == NULL) {
+			printk(KERN_INFO "nitro: %s: "
+			       "Could not allocate space for new event.\n",
+			       __FUNCTION__);
+			return -ENOMEM;
+		}
+
 		ed->rsp = nitro_vcpu->syscall_event_rsp;
 		ed->cr3 = syscall_event_cr3;
 		nitro_hash_add(kvm, &ed, ed->rsp);
