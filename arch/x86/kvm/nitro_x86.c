@@ -85,37 +85,10 @@ int nitro_set_syscall_trap(struct kvm *kvm, unsigned long *bitmap,
 
 	mutex_lock(&nitro->settings_lock);
 	ignored = _ignore_events(nitro);
-	if (nitro->watch_all_syscalls)
-		kfree(bitmap); /* All system calls are already watched. */
-	else if (nitro->system_call_bm == NULL) {
-		/* No system calls were previously watched. */
-		nitro->system_call_bm = bitmap;
-		nitro->system_call_max = system_call_max;
-	} else {
-		/* Use the larger system call bitmap. */
-		unsigned long *smaller_bm;
-		int smaller_max;
-		int word_i;
-
-		if (system_call_max > nitro->system_call_max) {
-			smaller_bm = nitro->system_call_bm;
-			smaller_max = nitro->system_call_max;
-
-			nitro->system_call_bm = bitmap;
-			nitro->system_call_max = system_call_max;
-		} else {
-			smaller_bm = bitmap;
-			smaller_max = system_call_max;
-		}
-
-		for (word_i = 0;
-		     word_i < n_words_in_syscall_bitmap(smaller_max);
-		     word_i++) {
-			nitro->system_call_bm[word_i] |= smaller_bm[word_i];
-		}
-
-		kfree(smaller_bm);
-	}
+	if (!ignored)
+		clear_syscall_settings(nitro);
+	nitro->system_call_bm = bitmap;
+	nitro->system_call_max = system_call_max;
 	mutex_unlock(&nitro->settings_lock);
 
 	if (ignored)

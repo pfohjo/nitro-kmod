@@ -65,16 +65,12 @@ inline static void remove_process(struct nitro_process_node *process_node)
 }
 
 /*
- * Stop watching any system calls.
+ * Assuming no other thread is accessing the settings,
+ * clear the system call settings.
  * @param nitro	contains the system call settings for the virtual machine
  */
-inline static void clear_settings(struct nitro *nitro)
+inline static void clear_syscall_settings(struct nitro *nitro)
 {
-	struct nitro_process_node *process_node;
-	int dummy_bkt;
-
-	mutex_lock(&nitro->settings_lock);
-
 	if (nitro->system_call_bm != NULL) {
 		unsigned long *system_call_bm = nitro->system_call_bm;
 
@@ -83,6 +79,20 @@ inline static void clear_settings(struct nitro *nitro)
 		kfree(system_call_bm);
 	} else if (nitro->watch_all_syscalls)
 		nitro->watch_all_syscalls = false;
+}
+
+/*
+ * Stop watching any system calls, and clear the set of watched processes.
+ * @param nitro	contains the trap settings for the virtual machine
+ */
+inline static void clear_settings(struct nitro *nitro)
+{
+	struct nitro_process_node *process_node;
+	int dummy_bkt;
+
+	mutex_lock(&nitro->settings_lock);
+
+	clear_syscall_settings(nitro);
 
 	hash_for_each(nitro->process_watch_ht, dummy_bkt, process_node, node) {
 		remove_process(process_node);
