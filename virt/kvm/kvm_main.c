@@ -2044,6 +2044,21 @@ out_free2:
 		r = kvm_arch_vcpu_ioctl_set_sregs(vcpu, kvm_sregs);
 		goto out_no_put;
 	}
+	case KVM_NITRO_TRANSLATE: {
+		struct kvm_translation tr;
+
+		r = -EFAULT;
+		if (copy_from_user(&tr, argp, sizeof tr))
+			goto out_no_put;
+		r = kvm_arch_vcpu_ioctl_translate(vcpu, &tr);
+		if (r)
+			goto out_no_put;
+		r = -EFAULT;
+		if (copy_to_user(argp, &tr, sizeof tr))
+			goto out_no_put;
+		r = 0;
+		goto out_no_put;
+	}
 #if defined(CONFIG_S390) || defined(CONFIG_PPC) || defined(CONFIG_MIPS)
 	case KVM_S390_INTERRUPT:
 	case KVM_INTERRUPT:
@@ -2568,7 +2583,7 @@ static long kvm_vm_ioctl(struct file *filp,
 		int i;
 		struct nitro_vcpus nvcpus;
 
-		r = nitro_iotcl_attach_vcpus(kvm,&nvcpus);
+		r = nitro_ioctl_attach_vcpus(kvm,&nvcpus);
 		if (r)
 			goto out;
 
@@ -2734,7 +2749,7 @@ static long kvm_dev_ioctl(struct file *filp,
 		r = -EOPNOTSUPP;
 		break;
 	case KVM_NITRO_NUM_VMS:
-		r = nitro_iotcl_num_vms();
+		r = nitro_ioctl_num_vms();
 		break;
 	case KVM_NITRO_ATTACH_VM: {
 		pid_t creator;

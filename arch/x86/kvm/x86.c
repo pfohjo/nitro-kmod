@@ -3872,52 +3872,81 @@ long kvm_arch_vm_ioctl(struct file *filp,
 		long unsigned *bitmap;
 
 		r = -EFAULT;
-		if (copy_from_user(&user_sct, argp, sizeof(struct nitro_syscall_trap)))
+		if (copy_from_user(&user_sct, argp,
+				   sizeof(struct nitro_syscall_trap)))
 			goto out;
 		
-		if(user_sct.size > 0){
+		if(user_sct.size > 0) {
 			r = -ENOMEM;
-			syscalls = kmalloc(user_sct.size * sizeof(int), GFP_KERNEL);
+			syscalls = kmalloc(user_sct.size * sizeof(int),
+					   GFP_KERNEL);
 			if (syscalls == NULL)
 				goto out;
 			
 			r = -EFAULT;
-			if (copy_from_user(syscalls, user_sct.syscalls, user_sct.size * sizeof(int))){
+			if (copy_from_user(syscalls, user_sct.syscalls,
+					   user_sct.size * sizeof(int))){
 				kfree(syscalls);
 				goto out;
 			}
 			
 			system_call_max = 0;
-			for(i=0;i<user_sct.size;i++)
+			for(i=0; i < user_sct.size; i++)
 				if(syscalls[i] > system_call_max)
 					system_call_max = syscalls[i];
-				
-			bm_size = ((system_call_max / (sizeof(unsigned long) * 8)) + 1) * (sizeof(unsigned long) * 8);
-  
+
+			bm_size = n_words_in_syscall_bitmap(system_call_max) *
+				  N_BITS_IN_BITMAP_WORD;
+
 			r = -ENOMEM;
 			bitmap = kmalloc(bm_size / 8, GFP_KERNEL);
-			if (bitmap == NULL){
+			if (bitmap == NULL) {
 				kfree(syscalls);
 				goto out;
 			}
+
+			bitmap_zero(bitmap, bm_size);
 			
-			bitmap_zero(bitmap,bm_size);
-			
-			for(i=0;i<user_sct.size;i++)
-			  set_bit(syscalls[i],bitmap);
+			for(i=0; i<user_sct.size; i++)
+				set_bit(syscalls[i],bitmap);
 			
 			kfree(syscalls);
-		}
-		else{
+		} else {
 			bitmap = NULL;
 			system_call_max = 0;
 		}
-	  
-		r = nitro_set_syscall_trap(kvm,bitmap,system_call_max);
+
+		r = nitro_set_syscall_trap(kvm, bitmap, system_call_max);
 		break;
 	}
 	case KVM_NITRO_UNSET_SYSCALL_TRAP: {
 		r = nitro_unset_syscall_trap(kvm);
+		break;
+	}
+	case KVM_NITRO_SET_ALL_SYSCALL_TRAP: {
+		r = nitro_set_all_syscall_trap(kvm);
+		break;
+	}
+	case KVM_NITRO_ADD_PROCESS_TRAP: {
+		ulong process_cr3;
+
+		if (copy_from_user(&process_cr3, argp, sizeof(process_cr3))) {
+			r = -EFAULT;
+			goto out;
+		}
+
+		r = nitro_add_process_trap(kvm, process_cr3);
+		break;
+	}
+	case KVM_NITRO_REMOVE_PROCESS_TRAP: {
+		ulong process_cr3;
+
+		if (copy_from_user(&process_cr3, argp, sizeof(process_cr3))) {
+			r = -EFAULT;
+			goto out;
+		}
+
+		r = nitro_remove_process_trap(kvm, process_cr3);
 		break;
 	}
 
@@ -6131,7 +6160,7 @@ static int __vcpu_run(struct kvm_vcpu *vcpu)
 		if (r <= 0)
 			break;
 		
-		if(vcpu->nitro.event)
+		if (vcpu->nitro.event)
 			nitro_report_event(vcpu);
 
 		clear_bit(KVM_REQ_PENDING_TIMER, &vcpu->requests);

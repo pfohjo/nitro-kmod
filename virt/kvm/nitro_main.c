@@ -63,27 +63,32 @@ struct kvm* nitro_get_vm_by_creator(pid_t creator){
 }
 
 void nitro_create_vm_hook(struct kvm *kvm){
-  pid_t pid;
-  
-  //get current pid
-  pid = pid_nr(get_task_pid(current, PIDTYPE_PID));
-  printk(KERN_INFO "nitro: new VM created, creating process: %d\n", pid);
-  
-  //init nitro
-  kvm->nitro.traps = 0;
-  kvm->nitro.system_call_bm = NULL;
-  kvm->nitro.system_call_max = 0;
-  hash_init(kvm->nitro.system_call_rsp_ht);
+	struct nitro *nitro = &kvm->nitro;
+	pid_t pid;
+
+	/* get current pid */
+	pid = pid_nr(get_task_pid(current, PIDTYPE_PID));
+	printk(KERN_INFO "nitro: new VM created, creating process: %d\n", pid);
+
+	/* init nitro */
+	nitro->traps = 0;
+	nitro->system_call_bm = NULL;
+	nitro->system_call_max = 0;
+	nitro->watch_all_syscalls = false;
+	hash_init(nitro->system_call_rsp_ht);
+	hash_init(nitro->process_watch_ht);
+	mutex_init(&nitro->settings_lock);
 }
 
-void nitro_destroy_vm_hook(struct kvm *kvm){
-  //deinit nitro
-  kvm->nitro.traps = 0;
-  if(kvm->nitro.system_call_bm != NULL){
-    kfree(kvm->nitro.system_call_bm);
-    kvm->nitro.system_call_bm = NULL;
-  }
-  kvm->nitro.system_call_max = 0;
+void nitro_destroy_vm_hook(struct kvm *kvm)
+{
+	struct nitro *nitro = &kvm->nitro;
+
+	/* deinit nitro */
+
+	nitro->traps = 0;
+
+	clear_settings(nitro);
 }
 
 void nitro_create_vcpu_hook(struct kvm_vcpu *vcpu){
@@ -96,7 +101,7 @@ void nitro_destroy_vcpu_hook(struct kvm_vcpu *vcpu){
   vcpu->nitro.event = 0;
 }
 
-int nitro_iotcl_num_vms(void){
+int nitro_ioctl_num_vms(void){
   struct kvm *kvm;
   int rv = 0;
   
@@ -108,8 +113,8 @@ int nitro_iotcl_num_vms(void){
   return rv;
 }
 
-int nitro_iotcl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
-  int r,i;
+int nitro_ioctl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
+  int cpu_i;
   struct kvm_vcpu *v;
   
   mutex_lock(&kvm->lock);
@@ -118,15 +123,17 @@ int nitro_iotcl_attach_vcpus(struct kvm *kvm, struct nitro_vcpus *nvcpus){
   if(unlikely(nvcpus->num_vcpus > NITRO_MAX_VCPUS)){
     goto error_out;
   }
-  
-  kvm_for_each_vcpu(r, v, kvm){
-    nvcpus->ids[r] = v->vcpu_id;
+
+  kvm_for_each_vcpu(cpu_i, v, kvm){
+    nvcpus->ids[cpu_i] = v->vcpu_id;
     kvm_get_kvm(kvm);
-    nvcpus->fds[r] = create_vcpu_fd(v);
-    if(nvcpus->fds[r]<0){
-      for(i=r;r>=0;i--){
-	nvcpus->ids[r] = 0;
-	nvcpus->fds[i] = 0;
+    nvcpus->fds[cpu_i] = create_vcpu_fd(v);
+
+    if(nvcpus->fds[cpu_i] < 0){
+      int to_reset_i;
+
+      for(to_reset_i = cpu_i; to_reset_i >= 0; to_reset_i--){
+	nvcpus->fds[to_reset_i] = 0;
 	kvm_put_kvm(kvm);
       }
       goto error_out;
@@ -141,25 +148,37 @@ error_out:
   return -1;
 }
 
-int nitro_ioctl_get_event(struct kvm_vcpu *vcpu){
-  int rv;
-  
-  rv = down_interruptible(&(vcpu->nitro.n_wait_sem));
-  
-  if (rv == 0)
-    rv = vcpu->nitro.event;
-  
-  return rv;
+int nitro_ioctl_get_event(struct kvm_vcpu *vcpu)
+{
+	struct nitro_vcpu *nitro_vcpu = &vcpu->nitro;
+	int rv;
+
+	rv = down_interruptible(&nitro_vcpu->n_wait_sem);
+
+	if (rv == 0) {
+		if (unlikely((nitro_vcpu->event == 0) &&
+			     completion_done(&nitro_vcpu->k_wait_cv)))
+			printk(KERN_ALERT
+			       "Zero event. Still have %d pending events.",
+			       nitro_vcpu->n_wait_sem.count);
+		rv = nitro_vcpu->event;
+	}
+
+	return rv;
 }
 
-int nitro_ioctl_continue(struct kvm_vcpu *vcpu){
-  
-  //if no waiters
-  if(completion_done(&(vcpu->nitro.k_wait_cv)))
-    return -1;
-  
-  complete(&(vcpu->nitro.k_wait_cv));
-  return 0;
+int nitro_ioctl_continue(struct kvm_vcpu *vcpu)
+{
+	struct nitro_vcpu *nitro_vcpu = &vcpu->nitro;
+
+	/* if no waiters */
+	if(completion_done(&nitro_vcpu->k_wait_cv)) {
+		printk(KERN_ALERT "Already completed");
+		return -1;
+	}
+
+	complete(&nitro_vcpu->k_wait_cv);
+	return 0;
 }
 
 inline int nitro_is_trap_set(struct kvm *kvm, uint32_t trap){

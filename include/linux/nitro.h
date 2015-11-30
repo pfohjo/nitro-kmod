@@ -32,17 +32,23 @@ union event_data{
 #define KVM_NITRO_ATTACH_VM  	_IOW(KVMIO, 0xE1, pid_t)
 
 //VM functions
-#define KVM_NITRO_ATTACH_VCPUS	_IOR(KVMIO, 0xE2, struct nitro_vcpus)
-#define KVM_NITRO_SET_SYSCALL_TRAP _IOW(KVMIO, 0xE3, struct nitro_syscall_trap)
-#define KVM_NITRO_UNSET_SYSCALL_TRAP _IO(KVMIO, 0xE4)
+#define KVM_NITRO_ATTACH_VCPUS		_IOR(KVMIO, 0xE2, struct nitro_vcpus)
+#define KVM_NITRO_SET_SYSCALL_TRAP	_IOW(KVMIO, 0xE3, \
+					     struct nitro_syscall_trap)
+#define KVM_NITRO_UNSET_SYSCALL_TRAP	_IO(KVMIO, 0xE4)
+#define KVM_NITRO_SET_ALL_SYSCALL_TRAP	_IO(KVMIO, 0xE5)
+#define KVM_NITRO_ADD_PROCESS_TRAP	_IOW(KVMIO, 0xE6, ulong)
+#define KVM_NITRO_REMOVE_PROCESS_TRAP	_IOW(KVMIO, 0xE7, ulong)
 
 //VCPU functions
-#define KVM_NITRO_GET_EVENT	_IOR(KVMIO, 0xE5, union event_data)
-#define KVM_NITRO_CONTINUE	_IO(KVMIO, 0xE6)
+#define KVM_NITRO_GET_EVENT	_IOR(KVMIO, 0xE8, union event_data)
+#define KVM_NITRO_CONTINUE	_IO(KVMIO, 0xE9)
 
-#define KVM_NITRO_GET_REGS              _IOR(KVMIO,  0xE7, struct kvm_regs)
-#define KVM_NITRO_SET_REGS              _IOW(KVMIO,  0xE8, struct kvm_regs)
-#define KVM_NITRO_GET_SREGS             _IOR(KVMIO,  0xE9, struct kvm_sregs)
-#define KVM_NITRO_SET_SREGS             _IOW(KVMIO,  0xEA, struct kvm_sregs)
+#define KVM_NITRO_GET_REGS              _IOR(KVMIO,  0xEA, struct kvm_regs)
+#define KVM_NITRO_SET_REGS              _IOW(KVMIO,  0xEB, struct kvm_regs)
+#define KVM_NITRO_GET_SREGS             _IOR(KVMIO,  0xEC, struct kvm_sregs)
+#define KVM_NITRO_SET_SREGS             _IOW(KVMIO,  0xED, struct kvm_sregs)
+#define KVM_NITRO_TRANSLATE		_IOWR(KVMIO, 0xEF, \
+					      struct kvm_translation)
 
 #endif //NITRO_H_
